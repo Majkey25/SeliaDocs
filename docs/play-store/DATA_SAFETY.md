@@ -1,6 +1,6 @@
 # Google Play data safety
 
-Working answers for version `0.6.0-beta.1` (`com.majkeylab.seliadocs`). Recheck them whenever dependencies or behavior change.
+Working answers checked against the signed version `0.6.1-beta.1` / code `14` (`com.majkeylab.seliadocs`). Recheck them whenever dependencies or behavior change.
 
 ## Collection and sharing
 
@@ -22,7 +22,9 @@ Google's ML Kit disclosure also covers device and app information, performance m
 
 ## App behavior supporting these answers
 
-- `INTERNET` and `ACCESS_NETWORK_STATE` permissions support the Google ML Kit language-model download and SDK disclosure.
+- `INTERNET` and `ACCESS_NETWORK_STATE` permissions support Google ML Kit language-model downloads and SDK diagnostics.
+- The merged release manifest also contains `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`, and `FOREGROUND_SERVICE`, contributed by AndroidX WorkManager `2.7.0` through Digital Ink Recognition. It includes the app-specific signature permission `com.majkeylab.seliadocs.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`.
+- The signed APK does not request billing, advertising-ID, camera, microphone, location, contacts, or broad storage permissions. Verify the merged APK, not only the app's source manifest, when reviewing permissions.
 - No first-party ads, analytics, telemetry, crash reporting, account, cloud sync, or remote database service.
 - Notebook metadata, raw ink, recognition results, image OCR text, text, settings, selected image copies, and selected PDFs remain in private app storage. Digital ink recognition runs on-device after the model download; image OCR uses a bundled on-device model.
 - Image OCR is enabled by default for newly imported images and can be disabled in Settings.
