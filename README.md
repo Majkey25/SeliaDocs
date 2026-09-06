@@ -52,7 +52,7 @@ The default release bundle is unsigned. Publication uses an external upload keys
 
 ## Verification
 
-`0.6.0-beta.1` adds a Pencil brush that responds throughout each stroke to pressure, tilt, and orientation. It also adds a non-writing stylus hover preview, direct selected-ink editing, inline text drafts that survive Activity recreation, and stricter backup validation. Android 10/17 CI suites and native emulator pressure/pinch checks passed, alongside physical Huawei and signed-APK screenshot checks. See the [verification record](docs/qa/2026-09-05-production-finish.md). Physical active-pen hardware still requires a compatible test device. Default release builds remain unsigned unless the external upload keystore is supplied.
+`0.6.1-beta.1` makes new pen strokes respond across the full pressure range, prevents resting-palm panning after pen-up, and preserves pencil direction during partial erasing. The Huawei integration run reported 118 tests, including new-pen backup restore; 98 JVM tests passed. See the [verification record](docs/qa/2026-09-06-stylus-input.md) for checks and limits. Physical active-pen hardware still requires a compatible test device. Format-5 backups require an updated reader; formats 1–4 remain readable. Default release builds remain unsigned unless the external upload keystore is supplied.
 
 ## Scope
 

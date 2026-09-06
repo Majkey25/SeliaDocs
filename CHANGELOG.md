@@ -2,6 +2,18 @@
 
 All notable changes to SeliaSheets are documented here.
 
+## [0.6.1-beta.1] - 2026-09-06
+
+### Changed
+
+- New pen strokes respond across the full stylus-pressure range. Existing pen strokes retain their original appearance, and finger drawing keeps a fixed width.
+- Editable backups use format 5 for the new pen. Formats 1–4 remain readable; new backups require an updated reader.
+
+### Fixed
+
+- A resting palm no longer pans a zoomed page after the pen or hardware eraser lifts.
+- Partial erasing preserves pencil direction when stylus orientation crosses zero degrees.
+
 ## [0.6.0-beta.1] - 2026-09-05
 
 ### Added

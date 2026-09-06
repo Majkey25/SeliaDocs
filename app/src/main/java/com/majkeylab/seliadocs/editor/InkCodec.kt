@@ -20,7 +20,8 @@ import kotlin.math.max
 import kotlin.math.roundToLong
 import kotlin.math.sin
 
-internal enum class BrushKind { PRESSURE_PEN, PENCIL, MARKER, HIGHLIGHTER }
+// Keep existing families unchanged: stored strokes use these names to reconstruct their appearance.
+internal enum class BrushKind { PRESSURE_PEN, PENCIL, MARKER, HIGHLIGHTER, RESPONSIVE_PEN }
 
 internal data class EncodedStroke(
     val brushKind: BrushKind,
@@ -71,6 +72,7 @@ internal object InkCodec {
             BrushKind.PRESSURE_PEN ->
                 StockBrushes.pressurePen(StockBrushes.PressurePenVersion.V1)
             BrushKind.PENCIL -> SeliaInkBrushes.pencil
+            BrushKind.RESPONSIVE_PEN -> SeliaInkBrushes.pen
             BrushKind.MARKER -> StockBrushes.marker(StockBrushes.MarkerVersion.V1)
             BrushKind.HIGHLIGHTER ->
                 StockBrushes.highlighter(
@@ -326,7 +328,7 @@ private fun denseSamples(stroke: Stroke, spacing: Float): List<InkSample> {
                     strokeUnitLengthCm = lerp(start.strokeUnitLengthCm, end.strokeUnitLengthCm, progress),
                     pressure = lerp(start.pressure, end.pressure, progress),
                     tiltRadians = lerp(start.tiltRadians, end.tiltRadians, progress),
-                    orientationRadians = lerp(start.orientationRadians, end.orientationRadians, progress),
+                    orientationRadians = lerpOrientation(start.orientationRadians, end.orientationRadians, progress),
                 )
         }
     }
@@ -357,5 +359,12 @@ private fun sampleRuns(samples: List<InkSample>, erased: List<Boolean>): List<Li
 }
 
 private fun lerp(start: Float, end: Float, progress: Float): Float = start + (end - start) * progress
+
+private fun lerpOrientation(start: Float, end: Float, progress: Float): Float {
+    if (start == StrokeInput.NO_ORIENTATION) return start
+    val halfTurn = TWO_PI / 2f
+    val delta = (end - start + halfTurn).normalizedOrientation() - halfTurn
+    return (start + delta * progress).normalizedOrientation()
+}
 
 private const val MAX_DENSE_SAMPLES = 100_000

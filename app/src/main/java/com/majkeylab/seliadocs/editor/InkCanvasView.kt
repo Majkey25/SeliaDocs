@@ -69,7 +69,7 @@ internal class InkCanvasView @JvmOverloads constructor(
     var listener: Listener? = null
     var fingerDrawing: Boolean = false
     var tool: EditorTool = EditorTool.PEN
-    var brush = InkCodec.createBrush(BrushKind.PRESSURE_PEN, 0xFF202124.toInt(), 4f)
+    var brush = InkCodec.createBrush(BrushKind.RESPONSIVE_PEN, 0xFF202124.toInt(), 4f)
     internal val hoverPreviewVisible: Boolean
         get() = gestureOverlay.hoverVisible
 

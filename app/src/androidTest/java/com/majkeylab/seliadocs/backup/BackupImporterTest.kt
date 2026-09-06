@@ -19,6 +19,9 @@ import com.majkeylab.seliadocs.data.PaperTemplate
 import com.majkeylab.seliadocs.data.PdfPageSpec
 import com.majkeylab.seliadocs.data.SeliaDocsDatabase
 import com.majkeylab.seliadocs.data.SeliaDocsRepository
+import com.majkeylab.seliadocs.data.StrokePayload
+import com.majkeylab.seliadocs.editor.BrushKind
+import com.majkeylab.seliadocs.editor.toInkStroke
 import com.majkeylab.seliadocs.library.LibraryViewModel
 import com.majkeylab.seliadocs.pdf.PdfSandboxClient
 import java.io.ByteArrayInputStream
@@ -101,6 +104,28 @@ class BackupImporterTest {
         val assetId = content.elements.single().assetId
         assertArrayEquals(testPng(0xFFFF0000.toInt()), assets.requireFile(requireNotNull(assetId)).readBytes())
         assertEquals(RestoreSummary(1, 1, 1, 0), summary)
+    }
+
+    @Test
+    fun responsivePenExportValidationAndRestorePreserveLegacyInk() = runTest {
+        val legacy = validTestStrokePayload()
+        val responsive = legacy.copy(brushKind = BrushKind.RESPONSIVE_PEN.name)
+
+        importer.restore(
+            ByteArrayInputStream(sourceArchive("Responsive", listOf(legacy, responsive))),
+            RestoreMode.MERGE,
+        )
+
+        val strokes = repository.loadNotebook(repository.getAllNotebooks().single().id).strokes
+        assertEquals(2, strokes.size)
+        val restoredLegacy = strokes.single { it.brushKind == BrushKind.PRESSURE_PEN.name }
+        val restoredResponsive = strokes.single { it.brushKind == BrushKind.RESPONSIVE_PEN.name }
+        val decoded = restoredResponsive.toInkStroke()
+
+        assertArrayEquals(legacy.inputs, restoredLegacy.inputs)
+        assertArrayEquals(responsive.inputs, restoredResponsive.inputs)
+        assertEquals(responsive.size, decoded.brush.size, 0.001f)
+        assertEquals(0.7f, decoded.inputs[0].pressure, 0.001f)
     }
 
     @Test
@@ -510,13 +535,16 @@ class BackupImporterTest {
         assertTrue(restored.elements.all { it.rotation == 45f })
     }
 
-    private suspend fun sourceArchive(title: String): ByteArray {
+    private suspend fun sourceArchive(
+        title: String,
+        strokes: List<StrokePayload> = listOf(validTestStrokePayload()),
+    ): ByteArray {
         val sourceDatabase = inMemoryDatabase()
         val sourceRepository = repository(sourceDatabase)
         val sourceRoot = File(context.cacheDir, "backup-source-${System.nanoTime()}")
         val sourceAssets = AssetStore(sourceRoot)
         return try {
-            populate(sourceRepository, sourceAssets, title, testPng(0xFFFF0000.toInt()))
+            populate(sourceRepository, sourceAssets, title, testPng(0xFFFF0000.toInt()), strokes)
             ByteArrayOutputStream().also { output ->
                 BackupExporter(sourceRepository, sourceAssets, "test", clock = { 42L })
                     .export(BackupScope.Library, output)
@@ -532,15 +560,13 @@ class BackupImporterTest {
         targetAssets: AssetStore,
         title: String,
         assetBytes: ByteArray,
+        strokes: List<StrokePayload> = listOf(validTestStrokePayload()),
     ) {
         val notebookId = targetRepository.createNotebook(request(title))
         val page = targetRepository.getPages(notebookId).single()
         val chapterId = targetRepository.createChapter(notebookId, "Main chapter", 0xFF3156D9.toInt())
         targetRepository.assignPageToChapter(page.id, chapterId)
-        targetRepository.addStroke(
-            page.id,
-            validTestStrokePayload(),
-        )
+        strokes.forEach { targetRepository.addStroke(page.id, it) }
         targetRepository.updatePageText(page.id, "Imported page text")
         targetAssets.prepare()
         targetAssets.file("asset.png").writeBytes(assetBytes)

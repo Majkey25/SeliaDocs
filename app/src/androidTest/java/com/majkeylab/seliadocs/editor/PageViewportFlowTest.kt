@@ -42,6 +42,81 @@ class PageViewportFlowTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
+    fun pagePenCommitsWithTheFullRangePressureBrush() {
+        val finished = AtomicReference<Stroke>()
+        renderPage(EditorTool.PEN, onStrokeFinished = finished::set)
+        dispatchStylusGesture(visiblePaperPoint(0.35f, 0.48f), visiblePaperPoint(0.65f, 0.54f))
+        compose.waitUntil(10_000) { finished.get() != null }
+        assertEquals(BrushKind.RESPONSIVE_PEN, InkCodec.encode(requireNotNull(finished.get())).brushKind)
+    }
+
+    @Test
+    fun restingPalmDoesNotPanAfterStylusLift() {
+        assertPalmDoesNotPanAfterPenLift(MotionEvent.TOOL_TYPE_STYLUS)
+    }
+
+    @Test
+    fun restingPalmDoesNotPanAfterHardwareEraserLift() {
+        assertPalmDoesNotPanAfterPenLift(MotionEvent.TOOL_TYPE_ERASER)
+    }
+
+    private fun assertPalmDoesNotPanAfterPenLift(penTool: Int) {
+        val commits = AtomicInteger()
+        renderPage(
+            EditorTool.PEN,
+            initialViewport = PageViewport(zoom = 2f),
+            onStrokeFinished = { commits.incrementAndGet() },
+            onEraseFinished = { commits.incrementAndGet() },
+        )
+        val before = visiblePaperPoint(0.5f, 0.5f)
+        val palm = before + Offset(0f, 80f)
+        val pen = before - Offset(0f, 80f)
+        val movedPalm = palm + Offset(90f, 0f)
+        val downTime = android.os.SystemClock.uptimeMillis()
+        fun event(time: Long, action: Int, palmPoint: Offset, includePen: Boolean): MotionEvent {
+            val count = if (includePen) 2 else 1
+            return MotionEvent.obtain(
+                downTime, downTime + time, action, count,
+                Array(count) { index ->
+                    MotionEvent.PointerProperties().apply {
+                        id = index
+                        toolType = if (index == 0) MotionEvent.TOOL_TYPE_FINGER else penTool
+                    }
+                },
+                Array(count) { index ->
+                    MotionEvent.PointerCoords().apply {
+                        val point = if (index == 0) palmPoint else pen
+                        x = point.x
+                        y = point.y
+                        pressure = 0.7f
+                    }
+                },
+                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0,
+            )
+        }
+        dispatchEvents(
+            event(0, MotionEvent.ACTION_DOWN, palm, false),
+            event(16, MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), palm, true),
+            event(32, MotionEvent.ACTION_MOVE, palm, true),
+            event(48, MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), palm, true),
+        )
+        compose.waitUntil(10_000) { commits.get() == 1 }
+        dispatchEvents(
+            event(64, MotionEvent.ACTION_MOVE, movedPalm, false),
+            event(80, MotionEvent.ACTION_UP, movedPalm, false),
+        )
+        compose.waitForIdle()
+        val after = visiblePaperPoint(0.5f, 0.5f)
+        assertEquals("Resting palm moved the page after pen lift", before.x, after.x, 0.5f)
+        assertEquals(before.y, after.y, 0.5f)
+
+        // A new finger gesture must still navigate after the palm has lifted.
+        dispatchFingerGesture(palm, movedPalm)
+        compose.waitForIdle()
+        assertTrue(visiblePaperPoint(0.5f, 0.5f).x > after.x + 10f)
+    }
+
+    @Test
     fun externalTabletStylusPreservesPressureAtZoom() {
         assumeTrue(
             InstrumentationRegistry.getArguments().getString("externalTabletStylus") == "true",

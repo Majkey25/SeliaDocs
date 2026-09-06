@@ -381,11 +381,12 @@ private fun Paper(
                         var lastCentroid: Offset? = null
                         var initialTouchSpan: Float? = null
                         var pinchOwned = false
+                        var stylusOwned = false
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val hasStylus =
-                                event.changes.any { change ->
-                                    change.pressed &&
+                            stylusOwned =
+                                stylusOwned || event.changes.any { change ->
+                                    (change.pressed || change.previousPressed) &&
                                         (change.type == PointerType.Stylus || change.type == PointerType.Eraser)
                                 }
                             val touchChanges = event.changes.filter { it.type == PointerType.Touch }
@@ -418,7 +419,7 @@ private fun Paper(
                             val gestureOwned = overlayOwned || (tool == EditorTool.TYPE && touches.isNotEmpty())
                             if (
                                 canUpdatePageViewport(
-                                    hasStylus = hasStylus,
+                                    hasStylus = stylusOwned,
                                     overlayOwned = overlayOwned,
                                     touchCount = touches.size,
                                     fingerDrawing = fingerDrawing,
@@ -463,7 +464,7 @@ private fun Paper(
                                     fingerDrawing = fingerDrawing,
                                     zoomed = viewportZoom > 1f,
                                     scaleChanged = pinchOwned,
-                                    stylusOwned = hasStylus,
+                                    stylusOwned = stylusOwned,
                                     gestureOwned = gestureOwned,
                                     newPointerDownAfterOwnership = newPointerDownAfterOwnership,
                                     canceled = finished && !nativeReleased.get(),
@@ -1270,14 +1271,14 @@ private fun brushFor(
 ) =
     when (tool) {
         EditorTool.TYPE,
-        EditorTool.PEN -> InkCodec.createBrush(BrushKind.PRESSURE_PEN, penColorArgb, penWidth)
+        EditorTool.PEN -> InkCodec.createBrush(BrushKind.RESPONSIVE_PEN, penColorArgb, penWidth)
         EditorTool.PENCIL ->
             InkCodec.createBrush(BrushKind.PENCIL, penColorArgb, penWidth * 0.55f)
         EditorTool.HIGHLIGHTER ->
             InkCodec.createBrush(BrushKind.HIGHLIGHTER, highlighterColorArgb, highlighterWidth)
         EditorTool.ERASER,
         EditorTool.LASSO,
-        -> InkCodec.createBrush(BrushKind.PRESSURE_PEN, penColorArgb, penWidth)
+        -> InkCodec.createBrush(BrushKind.RESPONSIVE_PEN, penColorArgb, penWidth)
     }
 
 @Composable
