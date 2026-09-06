@@ -138,7 +138,7 @@ class BackupValidatorTest {
     @Test
     fun unsupportedVersionIsRejected() = runTest {
         val manifest =
-            """{"formatVersion":5,"appVersion":"test","exportedAt":1,"notebookCount":1,"pageCount":1,"assetCount":0}"""
+            """{"formatVersion":${BACKUP_FORMAT_VERSION + 1},"appVersion":"test","exportedAt":1,"notebookCount":1,"pageCount":1,"assetCount":0}"""
                 .toByteArray()
         val records = validRecords()
 

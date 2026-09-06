@@ -119,20 +119,20 @@ class BackupJsonTest {
     fun unsupportedVersionReturnsTypedFailure() {
         assertThrows(BackupFailure.UnsupportedVersion::class.java) {
             BackupJson.readManifest(
-                StringReader("""{"formatVersion":5,"appVersion":"x","exportedAt":1}"""),
+                StringReader("""{"formatVersion":${BACKUP_FORMAT_VERSION + 1},"appVersion":"x","exportedAt":1}"""),
             )
         }
     }
 
     @Test
-    fun formatFourIsOutsideReleasedV053ReaderRange() {
+    fun exportFormatIsOutsideReleasedV053ReaderRange() {
         // v0.5.3 validates formatVersion in 1..3 before reading records.
         assertFalse(BACKUP_FORMAT_VERSION in 1..3)
     }
 
     @Test
     fun pencilStrokeRoundTripsWithFormatFour() {
-        val manifest = BackupManifest(BACKUP_FORMAT_VERSION, "test", 1L)
+        val manifest = BackupManifest(4, "test", 1L)
         val stroke =
             BackupStroke(
                 "pencil",

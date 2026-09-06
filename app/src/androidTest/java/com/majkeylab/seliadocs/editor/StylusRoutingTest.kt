@@ -6,7 +6,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
-import androidx.ink.brush.StockBrushes
 import androidx.ink.strokes.Stroke
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -178,7 +177,7 @@ class StylusRoutingTest {
         assertFalse(stroke.inputs.hasTilt())
         assertFalse(stroke.inputs.hasOrientation())
         assertEquals(
-            StockBrushes.pressurePen(StockBrushes.PressurePenVersion.V1),
+            SeliaInkBrushes.pen,
             stroke.brush.family,
         )
     }
@@ -287,40 +286,59 @@ class StylusRoutingTest {
     @Test
     fun canceledPalmStrokeIsNotCommitted() {
         val finished = mutableListOf<Stroke>()
+        val canceled = mutableListOf<Int>()
+        val committed = CountDownLatch(1)
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val view = InkCanvasView(activity)
+                activity.setContentView(view, android.view.ViewGroup.LayoutParams(500, 500))
                 view.listener =
                     object : InkCanvasView.Listener {
                         override fun onStrokeFinished(stroke: Stroke) {
                             finished += stroke
+                            committed.countDown()
                         }
 
-                        override fun onStrokeCanceled(pointerId: Int) = Unit
+                        override fun onStrokeCanceled(pointerId: Int) {
+                            canceled += pointerId
+                        }
                     }
                 view.measure(exactly(500), exactly(500))
                 view.layout(0, 0, 500, 500)
-                val downTime = 1_000L
-                view.dispatchTouchEvent(
-                    stylusEvent(downTime, downTime, MotionEvent.ACTION_DOWN, 40f, 50f),
-                )
-                view.dispatchTouchEvent(
-                    stylusEvent(downTime, downTime + 16, MotionEvent.ACTION_MOVE, 80f, 90f),
-                )
-                view.dispatchTouchEvent(
-                    stylusEvent(
-                        downTime,
-                        downTime + 32,
-                        MotionEvent.ACTION_UP,
-                        100f,
-                        120f,
-                        MotionEvent.FLAG_CANCELED,
-                    ),
-                )
+                view.post {
+                    val downTime = android.os.SystemClock.uptimeMillis()
+                    view.dispatchTouchEvent(
+                        stylusEvent(downTime, downTime, MotionEvent.ACTION_DOWN, 40f, 50f),
+                    )
+                    view.dispatchTouchEvent(
+                        stylusEvent(downTime, downTime + 16, MotionEvent.ACTION_MOVE, 80f, 90f),
+                    )
+                    view.dispatchTouchEvent(
+                        stylusEvent(
+                            downTime,
+                            downTime + 32,
+                            MotionEvent.ACTION_UP,
+                            100f,
+                            120f,
+                            MotionEvent.FLAG_CANCELED,
+                        ),
+                    )
+                    assertEquals(listOf(0), canceled)
+                    val nextDown = downTime + 48
+                    view.dispatchTouchEvent(
+                        stylusEvent(nextDown, nextDown, MotionEvent.ACTION_DOWN, 200f, 220f),
+                    )
+                    view.dispatchTouchEvent(
+                        stylusEvent(nextDown, nextDown + 16, MotionEvent.ACTION_UP, 240f, 260f),
+                    )
+                }
+            }
+            assertTrue(committed.await(10, TimeUnit.SECONDS))
+            scenario.onActivity {
+                assertEquals(1, finished.size)
+                assertEquals(200f * 595f / 500f, finished.single().inputs[0].x, 0.1f)
             }
         }
-
-        assertTrue(finished.isEmpty())
     }
 
     @Test

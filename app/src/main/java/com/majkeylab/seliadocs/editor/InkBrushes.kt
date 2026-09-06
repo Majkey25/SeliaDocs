@@ -5,6 +5,7 @@ import androidx.ink.brush.BrushCoat
 import androidx.ink.brush.BrushFamily
 import androidx.ink.brush.BrushTip
 import androidx.ink.brush.ExperimentalInkCustomBrushApi
+import androidx.ink.brush.InputToolType
 import androidx.ink.brush.StockBrushes
 import androidx.ink.brush.behavior.DampingNode
 import androidx.ink.brush.behavior.ProgressDomain
@@ -12,9 +13,40 @@ import androidx.ink.brush.behavior.SourceNode
 import androidx.ink.brush.behavior.SourceNode.Source
 import androidx.ink.brush.behavior.TargetNode
 import androidx.ink.brush.behavior.TargetNode.Target
+import androidx.ink.brush.behavior.ToolTypeFilterNode
 
 @OptIn(ExperimentalInkCustomBrushApi::class)
 internal object SeliaInkBrushes {
+    val pen: BrushFamily by lazy {
+        val base = StockBrushes.pressurePen(StockBrushes.PressurePenVersion.V1)
+        val pressure =
+            BrushBehavior(
+                TargetNode(
+                    Target.SIZE_MULTIPLIER,
+                    0.35f,
+                    1.25f,
+                    ToolTypeFilterNode(
+                        setOf(InputToolType.STYLUS),
+                        DampingNode(
+                            ProgressDomain.DISTANCE_IN_MULTIPLES_OF_BRUSH_SIZE,
+                            0.35f,
+                            SourceNode(Source.NORMALIZED_PRESSURE, 0f, 1f),
+                        ),
+                    ),
+                ),
+            )
+        BrushFamily.builder()
+            .setCoat(
+                BrushCoat(
+                    BrushTip(cornerRounding = 1f, behaviors = listOf(pressure)),
+                    base.coats.single().paintPreferences,
+                ),
+            )
+            .setInputModel(base.inputModel)
+            .setDeveloperComment("Full-range stylus pressure; fixed size for touch and missing pressure.")
+            .build()
+    }
+
     val pencil: BrushFamily by lazy {
         val base = StockBrushes.pressurePen(StockBrushes.PressurePenVersion.V1)
         val tip =

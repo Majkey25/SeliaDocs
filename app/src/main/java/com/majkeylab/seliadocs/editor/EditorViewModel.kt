@@ -484,7 +484,7 @@ internal class EditorViewModel(
             when (encoded.brushKind) {
                 BrushKind.PENCIL -> EditorTool.PENCIL
                 BrushKind.HIGHLIGHTER -> EditorTool.HIGHLIGHTER
-                BrushKind.PRESSURE_PEN, BrushKind.MARKER -> EditorTool.PEN
+                BrushKind.PRESSURE_PEN, BrushKind.RESPONSIVE_PEN, BrushKind.MARKER -> EditorTool.PEN
             }
         val recognitionEligible =
             handwritingRecognition &&

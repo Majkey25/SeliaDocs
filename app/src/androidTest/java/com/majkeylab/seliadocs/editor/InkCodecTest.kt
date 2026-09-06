@@ -5,6 +5,7 @@ import androidx.ink.brush.InputToolType
 import androidx.ink.brush.StockBrushes
 import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
+import androidx.ink.strokes.StrokeInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.majkeylab.seliadocs.data.StrokeEntity
 import org.junit.Assert.assertEquals
@@ -14,6 +15,56 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class InkCodecTest {
+    @Test
+    fun segmentEraserKeepsPencilOrientationAcrossZeroInBothDirections() {
+        val fullTurn = (Math.PI * 2).toFloat()
+        listOf(fullTurn - 0.2f to 0.2f, 0.2f to fullTurn - 0.2f).forEach { (start, end) ->
+            val fragments = erasePencilMiddle(start, end)
+            assertEquals(2, fragments.size)
+            fragments.forEach { fragment ->
+                val inputs = fragment.toInkStroke().inputs
+                assertTrue(inputs.hasOrientation())
+                repeat(inputs.size) { index ->
+                    val orientation = inputs[index].orientationRadians
+                    assertTrue(
+                        "Erasing changed near-zero pen direction to $orientation radians",
+                        orientation <= 0.21f || orientation >= fullTurn - 0.21f,
+                    )
+                }
+            }
+            assertEquals(start, fragments.first().toInkStroke().inputs[0].orientationRadians, 0.001f)
+            val last = fragments.last().toInkStroke().inputs
+            assertEquals(end, last[last.size - 1].orientationRadians, 0.001f)
+        }
+    }
+
+    @Test
+    fun segmentEraserDoesNotInventMissingOrientation() {
+        val fragments = erasePencilMiddle(StrokeInput.NO_ORIENTATION, StrokeInput.NO_ORIENTATION)
+        assertEquals(2, fragments.size)
+        fragments.forEach { fragment ->
+            assertTrue(!fragment.toInkStroke().inputs.hasOrientation())
+        }
+    }
+
+    private fun erasePencilMiddle(startOrientation: Float, endOrientation: Float): List<StrokeEntity> {
+        val inputs =
+            MutableStrokeInputBatch()
+                .add(InputToolType.STYLUS, 0f, 0f, 0L, 0.01f, 0.4f, 0.8f, startOrientation)
+                .add(InputToolType.STYLUS, 100f, 0f, 100L, 0.01f, 0.8f, 1f, endOrientation)
+        val encoded = InkCodec.encode(Stroke(InkCodec.createBrush(BrushKind.PENCIL, 0xFF202124.toInt(), 4f), inputs))
+        val entity = StrokeEntity(
+            "stroke", "page", 0, encoded.brushKind.name, encoded.colorArgb,
+            encoded.size, encoded.epsilon, encoded.inputs,
+        )
+        var nextId = 0
+        return entity.eraseSegments(
+            listOf(CanvasPoint(50f, -20f), CanvasPoint(50f, 20f)),
+            radius = 8f,
+            idFactory = { "fragment-${nextId++}" },
+        )
+    }
+
     @Test
     fun pencilRoundTripKeepsDynamicFamilyAndInputs() {
         val inputs =
