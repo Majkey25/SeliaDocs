@@ -99,12 +99,14 @@ class LibraryFlowTest {
     fun gridTemplateSelectsGridPortraitDefaults() {
         rule.onNodeWithContentDescription("New notebook").performClick()
 
-        rule.onNodeWithTag("notebook-dialog-scroll").performTouchInput {
-            swipe(
-                Offset(centerX, height * 0.75f),
-                Offset(centerX, height * 0.45f),
-                durationMillis = 300,
-            )
+        if (runCatching { rule.onNodeWithTag("notebook-dialog-scroll").fetchSemanticsNode() }.isSuccess) {
+            rule.onNodeWithTag("notebook-dialog-scroll").performTouchInput {
+                swipe(
+                    Offset(centerX, height * 0.75f),
+                    Offset(centerX, height * 0.45f),
+                    durationMillis = 300,
+                )
+            }
         }
         rule.onNodeWithContentDescription("Notebook template: Grid notebook")
             .performScrollTo()

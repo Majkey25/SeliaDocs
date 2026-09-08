@@ -455,8 +455,10 @@ class EditorCompactUiTest {
     fun recreationKeepsOrSavesInlineText() {
         createAndOpenNotebook()
         val draft = "Recreated inline ${System.nanoTime()}"
-        rule.onNodeWithTag("compact-insert").performClick()
-        rule.onNodeWithTag("compact-insert-text").performClick()
+        val toolbar = if (hasTag("compact-insert")) "compact" else "toolbar"
+        rule.onNodeWithTag("$toolbar-insert").performClick()
+        rule.onNodeWithTag("$toolbar-insert-text").performClick()
+        rule.waitUntil(5_000) { hasTag("inline-text-placement") }
         rule.onNodeWithTag("page-paper").performTouchInput { click(center) }
         rule.onNodeWithTag("inline-text-editor").performTextInput(draft)
 
@@ -595,8 +597,10 @@ class EditorCompactUiTest {
     fun recreationDuringToolSaveKeepsInputDisabledAndBackSavesOnce() {
         val title = createAndOpenNotebook()
         val draft = "Retained save ${System.nanoTime()}"
-        rule.onNodeWithTag("compact-insert").performClick()
-        rule.onNodeWithTag("compact-insert-text").performClick()
+        val toolbar = if (hasTag("compact-insert")) "compact" else "toolbar"
+        rule.onNodeWithTag("$toolbar-insert").performClick()
+        rule.onNodeWithTag("$toolbar-insert-text").performClick()
+        rule.waitUntil(5_000) { hasTag("inline-text-placement") }
         rule.onNodeWithTag("page-paper").performTouchInput { click(center) }
         rule.onNodeWithTag("inline-text-editor").performTextInput(draft)
         val gateAcquired = CountDownLatch(1)
@@ -609,7 +613,7 @@ class EditorCompactUiTest {
         }
         try {
             assertTrue(gateAcquired.await(5, TimeUnit.SECONDS))
-            rule.onNodeWithTag("compact-tool-pencil").performClick()
+            rule.onNodeWithTag("$toolbar-tool-pencil").performClick()
             rule.onNodeWithTag("inline-text-editor").assertIsNotEnabled().assertTextContains(draft)
             rule.activityRule.scenario.recreate()
             rule.waitUntil(10_000) {

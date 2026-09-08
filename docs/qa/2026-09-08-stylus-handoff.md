@@ -91,6 +91,8 @@ Run `34220800667` passed the expanded text case but exposed a native-input readi
 
 The native tests now wait for the focused decor view before computing their initial coordinates. The pinch test observes the final finger UP and waits for layout to settle before publishing pen coordinates. This also removes an independent race where the pen coordinates came from an intermediate pinch frame. No input assertion or production behavior changed.
 
+The first native-tablet run (`34221875421`) passed the native pressure/pinch stage. Its broad suite exposed three test assumptions: two recreation tests selected the compact toolbar on a wide screen, and the grid-template test tried to scroll the phone-only dialog container. The tests now choose the rendered toolbar and only perform that preliminary swipe when the phone container exists. Text persistence, save-state, and selected paper/orientation assertions remain unchanged. Local test-APK compilation and lint passed; native tablet execution remains the CI gate.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing
