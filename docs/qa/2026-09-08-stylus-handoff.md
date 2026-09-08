@@ -85,6 +85,8 @@ That cleanup change passed Android 17 CI. Android 10 again failed the expanded t
 
 Ten isolated phone repetitions passed, followed by another `OK (321 tests)` with two expected opt-in skips. Log: `.reference/tmp/device-qa-20260908-132301-086.log`. The phone was released at 13:27 CEST without changing its viewport. Publication remains gated on a clean full CI run.
 
+Android 17 CI now uses the SDK's `pixel_tablet` hardware profile, verified in the device catalog. Android 10 keeps `pixel_4`. The same native stylus pressure/pinch and full instrumentation suites remain enabled. This adds native tablet geometry to the existing forced-size layout checks without changing the app artifacts.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing
