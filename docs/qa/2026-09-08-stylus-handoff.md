@@ -87,6 +87,10 @@ Ten isolated phone repetitions passed, followed by another `OK (321 tests)` with
 
 Android 17 CI now uses the SDK's `pixel_tablet` hardware profile, verified in the device catalog. Android 10 keeps `pixel_4`. The same native stylus pressure/pinch and full instrumentation suites remain enabled. This adds native tablet geometry to the existing forced-size layout checks without changing the app artifacts.
 
+Run `34220800667` passed the expanded text case but exposed a native-input readiness race. Its logcat emitted `READY_PINCH` at 11:33:05.467; the target Activity gained input focus only at 11:33:05.998. The test could announce input readiness before Android could route the gesture to it.
+
+The native tests now wait for the focused decor view before computing their initial coordinates. The pinch test observes the final finger UP and waits for layout to settle before publishing pen coordinates. This also removes an independent race where the pen coordinates came from an intermediate pinch frame. No input assertion or production behavior changed.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing

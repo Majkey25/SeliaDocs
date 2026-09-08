@@ -11,6 +11,8 @@ import androidx.ink.brush.InputToolType
 import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -29,6 +31,7 @@ import com.majkeylab.seliadocs.data.PaperTemplate
 import com.majkeylab.seliadocs.data.StrokeEntity
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
@@ -127,6 +130,7 @@ class PageViewportFlowTest {
             initialViewport = PageViewport(zoom = 2f),
             onStrokeFinished = finished::set,
         )
+        waitForNativeInputReady()
         logInputMarker(
             "READY_PRESSURE",
             "pen",
@@ -154,8 +158,19 @@ class PageViewportFlowTest {
             InstrumentationRegistry.getArguments().getString("externalTabletStylus") == "true",
         )
         val finished = AtomicReference<Stroke>()
-        renderPage(EditorTool.PEN, onStrokeFinished = finished::set)
+        val pinchReleased = AtomicBoolean(false)
+        renderPage(
+            EditorTool.PEN,
+            onStrokeFinished = finished::set,
+            modifier = Modifier.motionEventSpy { event ->
+                if (event.actionMasked == MotionEvent.ACTION_UP &&
+                    event.getToolType(event.actionIndex) == MotionEvent.TOOL_TYPE_FINGER) {
+                    pinchReleased.set(true)
+                }
+            },
+        )
         val viewport = compose.onNodeWithTag("page-viewport")
+        waitForNativeInputReady()
         logInputMarker(
             "READY_PINCH",
             "touch",
@@ -167,8 +182,10 @@ class PageViewportFlowTest {
             ),
         )
         compose.waitUntil(30_000) {
-            zoomDescription(viewport).removePrefix("Zoom ").removeSuffix("%").toInt() > 100
+            pinchReleased.get() &&
+                zoomDescription(viewport).removePrefix("Zoom ").removeSuffix("%").toInt() > 100
         }
+        compose.waitForIdle()
         logInputMarker(
             "READY_AFTER_PINCH",
             "pen",
@@ -789,6 +806,13 @@ class PageViewportFlowTest {
         return requireNotNull(result.get())
     }
 
+    private fun waitForNativeInputReady() {
+        compose.waitUntil(10_000) {
+            compose.runOnIdle { compose.activity.window.decorView.hasWindowFocus() }
+        }
+        compose.waitForIdle()
+    }
+
     private fun logInputMarker(name: String, kind: String, points: List<Offset>) {
         val coordinates = points.joinToString(";") { "${it.x.roundToInt()},${it.y.roundToInt()}" }
         Log.i("SeliaSheetsStylusQA", "$name $kind=$coordinates")
@@ -940,10 +964,12 @@ class PageViewportFlowTest {
         onStrokeFinished: (Stroke) -> Unit = {},
         onLassoFinished: (List<CanvasPoint>) -> Unit = {},
         onEraseFinished: (List<CanvasPoint>) -> Unit = {},
+        modifier: Modifier = Modifier,
     ) {
         compose.setContent {
             PageCanvas(
                 page = page,
+                modifier = modifier,
                 pageNumber = 1,
                 pageCount = 1,
                 strokes = emptyList(),
