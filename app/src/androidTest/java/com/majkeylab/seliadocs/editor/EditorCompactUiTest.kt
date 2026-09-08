@@ -678,7 +678,13 @@ class EditorCompactUiTest {
 
         rule.onNodeWithTag("toolbar-insert").performClick()
         rule.onNodeWithTag("toolbar-insert-text").performClick()
-        rule.onNodeWithTag("page-paper").performTouchInput { click(center) }
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag("inline-text-placement").assertIsDisplayed() }.isSuccess
+        }
+        rule.onNodeWithTag("inline-text-placement").performTouchInput { click(center) }
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag("inline-text-editor").assertIsDisplayed() }.isSuccess
+        }
 
         rule.onNodeWithTag("inline-text-editor").assertIsDisplayed()
     }

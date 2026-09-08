@@ -73,6 +73,10 @@ Final version-16 SHA-256:
 05F97FD3BA6B96B5A3EB772994584CD259168F190F26B95C5AB4956399599B4A  app-release.aab
 ```
 
+Android 17 CI passed on commit `6e49bc8`, including native pressure/pinch input and the corrected Undo/Back behavior. Android 10 found an existing text-placement test racing its asynchronous save barrier: it tapped `page-paper` before `inline-text-placement` was visible. The test now waits for the visible placement overlay, sends the actual touch there, and waits for the displayed editor. No assertion was removed and no production code changed.
+
+The corrected test, compact text placement, immediate Undo, and immediate Back passed on the Huawei: `OK (4 tests)`, log `.reference/tmp/device-qa-20260908-120800-636.log`. Signed version 16 also passed native-window pixel checks for pinch followed by stylus input and for stylus input after Home/resume. The phone was released at 12:09:15 CEST; only its two temporary capture files were removed.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing
