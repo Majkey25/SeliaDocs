@@ -7,4 +7,4 @@ Editor icons are adapted from Google Material Symbols © Google LLC
 
 Google ML Kit Digital Ink Recognition and Text Recognition are provided by Google LLC. Their use is subject to the [Google ML Kit terms](https://developers.google.com/ml-kit/terms) and [ML Kit data disclosure](https://developers.google.com/ml-kit/android-data-disclosure).
 
-Dependency versions are declared in [`app/build.gradle.kts`](app/build.gradle.kts). Android launcher artwork and SeliaSheets branding are original project assets.
+Dependency versions are declared in [`app/build.gradle.kts`](app/build.gradle.kts). Launcher and website branding files are maintained in `branding/` and `site/assets/`.

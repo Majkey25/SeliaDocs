@@ -38,6 +38,8 @@ SeliaSheets is a private, offline-first Android notebook for students. It combin
 
 ## Privacy
 
+Hosted policies: [Privacy](https://majkey25.github.io/SeliaSheets/privacy/) · [Terms and conditions](https://majkey25.github.io/SeliaSheets/terms/) · [Refunds](https://majkey25.github.io/SeliaSheets/refunds/) · [Cookies](https://majkey25.github.io/SeliaSheets/cookies/). The app's existing **Privacy policy** and **Source code** buttons lead to these links.
+
 Notebook content, raw ink, OCR text, and recognition results stay in private app storage unless the user exports them. Image text recognition is enabled by default for imported images and can be disabled in Settings. Handwriting recognition is off by default and requires an explicit Google model download. Google ML Kit processes recognition input and output on-device but collects SDK metadata and metrics for diagnostics and usage analytics. See the [privacy policy](PRIVACY.md) and [Google Play data-safety notes](docs/play-store/DATA_SAFETY.md).
 
 ## Build

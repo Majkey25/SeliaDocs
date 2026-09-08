@@ -1,6 +1,6 @@
 # SeliaSheets privacy policy
 
-Effective date: September 5, 2026
+Effective date: September 8, 2026
 
 SeliaSheets is an offline-first Android notebook published by Majkey25. This policy explains what the app processes and how users control their content.
 
@@ -28,7 +28,21 @@ Android backup is disabled for SeliaSheets. The app does not read unrelated phot
 
 PDF and `.seliasheets` backup export write to destinations selected by the user through Android's system document picker. SeliaSheets does not upload exported files.
 
-Privacy policy, source-code, and optional Buy Me a Coffee links open only after a user action and are handled by the user's browser. Handwriting model downloads and the ML Kit SDK disclosure use network access as described above. The destination website's own privacy policy applies after it opens.
+Privacy policy, source-code, and optional Buy Me a Coffee links open only after a user action and are handled by the user's browser. Handwriting model downloads and ML Kit diagnostics use network access as described above. The destination website's own privacy policy applies after it opens.
+
+## This website and support messages
+
+The static policy site has no forms, analytics scripts, advertising pixels, browser-storage code, or third-party embeds. GitHub Pages hosts it and processes technical requests, including IP addresses, under the [GitHub privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement). See the [cookies policy](https://majkey25.github.io/SeliaSheets/cookies/).
+
+If you email support, the publisher receives your email address and the information you send. This information is used to respond to your request, not for marketing. Support correspondence is handled on the basis of the legitimate interest in answering requests; privacy-rights requests may also require processing to meet legal obligations. Keep messages limited to the issue and redact unrelated personal data. GitHub Issues are public, so do not post private notebook contents there.
+
+Support correspondence is retained for as long as needed to resolve the request and meet applicable legal requirements. You can ask about or request deletion of that correspondence at [majkeylab@gmail.com](mailto:majkeylab@gmail.com).
+
+## Data rights
+
+Where applicable, you may request access, correction, erasure, restriction, or portability of personal data held by the publisher, and object to its processing. Where processing relies on consent, you may withdraw it. The publisher cannot remotely access or delete notebooks kept only on your device. Google-held SDK metrics and GitHub hosting records are handled through those providers' privacy channels.
+
+You may complain to your local data-protection authority. In the Czech Republic, see the [Office for Personal Data Protection](https://uoou.gov.cz/). Contact the publisher first if you want help identifying the relevant data or provider.
 
 ## Retention and deletion
 
