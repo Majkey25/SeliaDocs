@@ -2,6 +2,15 @@
 
 All notable changes to SeliaSheets are documented here.
 
+## [0.6.2-beta.1] - 2026-09-08
+
+### Fixed
+
+- Pressing or releasing either stylus barrel button during a stroke switches between ink and erasing without changing the selected tool.
+- Ink and eraser edits commit in their original order, including when a palm is touching the page.
+- Finished strokes survive immediate page removal. Back, Undo, Redo, and keyboard page navigation wait for pending ink.
+- Retained input excludes duplicate samples and predictions while preserving the zoom transform and supported pen axes.
+
 ## [0.6.1-beta.1] - 2026-09-06
 
 ### Changed

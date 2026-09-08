@@ -1,6 +1,10 @@
 package com.majkeylab.seliadocs.editor
 
 import android.net.Uri
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -70,6 +74,77 @@ import org.junit.runner.RunWith
 class EditorCompactUiTest {
     @get:Rule
     val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun immediateBackWaitsForNativeInkAndPersistsTheStroke() {
+        val title = openCompactEditor()
+        drawNativeStrokeThen { rule.activity.onBackPressedDispatcher.onBackPressed() }
+        rule.waitUntil(15_000) {
+            runCatching { rule.onNodeWithContentDescription("Open $title").fetchSemanticsNode() }.isSuccess
+        }
+        runBlocking {
+            val repository = SeliaDocsRepository(SeliaDocsDatabase.get(rule.activity.application))
+            val notebook = repository.getAllNotebooks().single { it.title == title }
+            val strokes = repository.getPages(notebook.id).flatMap { repository.getStrokes(it.id) }
+            assertEquals("Back discarded or duplicated pending ink", 1, strokes.size)
+        }
+    }
+
+    @Test
+    fun immediateUndoTargetsNewestPendingInk() {
+        val title = openCompactEditor()
+        drawNativeStrokeThen {}
+        rule.waitUntil(10_000) {
+            runCatching { rule.onNodeWithTag("compact-undo").assertIsEnabled() }.isSuccess
+        }
+        val undo = requireNotNull(rule.onNodeWithTag("compact-undo").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        drawNativeStrokeThen(origin = 0.6f) { undo() }
+        rule.waitForIdle()
+        rule.onNodeWithTag("compact-back").performClick()
+        rule.waitUntil(15_000) {
+            runCatching { rule.onNodeWithContentDescription("Open $title").fetchSemanticsNode() }.isSuccess
+        }
+        runBlocking {
+            val repository = SeliaDocsRepository(SeliaDocsDatabase.get(rule.activity.application))
+            val notebook = repository.getAllNotebooks().single { it.title == title }
+            val page = repository.getPages(notebook.id).first()
+            val strokes = repository.getStrokes(page.id)
+            assertEquals(1, strokes.size)
+            assertEquals("Undo removed the preceding stroke instead of pending ink", page.widthPoints * 0.3f,
+                strokes.single().toInkStroke().inputs[0].x, 1f)
+        }
+    }
+
+    private fun drawNativeStrokeThen(origin: Float = 0.3f, action: () -> Unit) {
+        rule.runOnUiThread {
+            fun findCanvas(view: View): InkCanvasView? {
+                if (view is InkCanvasView) return view
+                if (view is ViewGroup) {
+                    repeat(view.childCount) { index ->
+                        findCanvas(view.getChildAt(index))?.let { return it }
+                    }
+                }
+                return null
+            }
+            val canvas = requireNotNull(findCanvas(rule.activity.window.decorView))
+            assertEquals(EditorTool.PEN, canvas.tool)
+            val time = android.os.SystemClock.uptimeMillis()
+            listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP).forEachIndexed { index, action ->
+                val event = MotionEvent.obtain(
+                    time, time + index * 16L, action, 1,
+                    arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS }),
+                    arrayOf(MotionEvent.PointerCoords().apply {
+                        x = canvas.width * (origin + index * 0.1f)
+                        y = canvas.height * (origin + index * 0.05f)
+                        pressure = 0.7f
+                    }),
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0,
+                )
+                try { canvas.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+            action()
+        }
+    }
 
     @Test
     fun sessionHolderRetainsSameSessionAndResetsDifferentSession() {

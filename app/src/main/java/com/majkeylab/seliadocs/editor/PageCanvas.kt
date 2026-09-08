@@ -168,6 +168,7 @@ internal fun PageCanvas(
     loadPdfPage: suspend (String, Int, Int) -> androidx.compose.ui.graphics.ImageBitmap? = { _, _, _ -> null },
     initialViewport: PageViewport = PageViewport(),
     onCommitInkTransform: (InkSelectionTransform) -> Unit = {},
+    inkCanvases: MutableSet<InkCanvasView>? = null,
     modifier: Modifier = Modifier,
 ) {
     val frame = CanvasPageFrame(page, pageNumber, strokes, elements, blocks, ocrSearchHighlight)
@@ -225,6 +226,7 @@ internal fun PageCanvas(
                     loadPdfPage,
                     initialViewport,
                     onCommitInkTransform,
+                    inkCanvases,
                 )
             }
         }
@@ -282,6 +284,7 @@ private fun Paper(
     loadPdfPage: suspend (String, Int, Int) -> androidx.compose.ui.graphics.ImageBitmap?,
     initialViewport: PageViewport,
     onCommitInkTransform: (InkSelectionTransform) -> Unit,
+    inkCanvases: MutableSet<InkCanvasView>?,
 ) {
     val ratio = page.widthPoints.toFloat() / page.heightPoints
     var inkPreview by
@@ -354,6 +357,20 @@ private fun Paper(
         val hostView = LocalView.current
         val nativeReleased = remember(page.id) { AtomicBoolean(false) }
         val inkCanvas = remember(page.id) { AtomicReference<InkCanvasView>() }
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(page.id, lifecycleOwner, inkCanvases) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) inkCanvas.get()?.flushPendingCommits()
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                inkCanvas.get()?.let { view ->
+                    view.flushPendingCommits()
+                    inkCanvases?.remove(view)
+                }
+            }
+        }
         val eraserPointerId = remember(page.id) { AtomicInteger(-1) }
         val eraserEpoch = remember(page.id) { AtomicInteger() }
         val selectionBounds = remember(page.id) { AtomicReference<Rect?>(null) }
@@ -603,8 +620,14 @@ private fun Paper(
                     textEditingElement?.id,
                 )
                 AndroidView(
-                    factory = { context -> InkCanvasView(context).also(inkCanvas::set) },
+                    factory = { context ->
+                        InkCanvasView(context).also { view ->
+                            inkCanvas.set(view)
+                            inkCanvases?.add(view)
+                        }
+                    },
                     update = { view ->
+                        view.isEnabled = pageTextInputEnabled && isCurrentPage()
                         view.setPageSize(page.widthPoints, page.heightPoints)
                         view.fingerDrawing = fingerDrawing
                         view.tool = tool
