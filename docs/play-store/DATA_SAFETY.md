@@ -1,6 +1,6 @@
 # Google Play data safety
 
-Working answers checked against the signed version `0.6.2-beta.1` / code `15` (`com.majkeylab.seliadocs`). Its merged permission list is unchanged from version 14. Recheck these answers whenever dependencies or data handling change.
+Working answers checked against the signed version `0.6.2-beta.1` / code `16` (`com.majkeylab.seliadocs`). Its merged permission list is unchanged from version 14. Recheck these answers whenever dependencies or data handling change.
 
 ## Collection and sharing
 

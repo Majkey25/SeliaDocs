@@ -164,6 +164,7 @@ internal sealed interface EditorAction {
 
 internal data class EditorActionState(
     val pending: EditorAction? = null,
+    val deferredClose: EditorAction.Close? = null,
     val saving: Boolean = false,
     val ready: Boolean = false,
     val executing: EditorAction? = null,
@@ -252,7 +253,12 @@ internal class EditorSessionHolder : ViewModel(), ViewModelStoreOwner {
     fun requestAction(action: EditorAction) {
         if (mutableCloseState.value.closing) return
         val current = mutableActionState.value
-        if (current.pending is EditorAction.Close) return
+        if (current.pending is EditorAction.Close || current.deferredClose != null) return
+        // Back must not discard a history edit waiting for native ink handoff.
+        if (action is EditorAction.Close && (current.pending == EditorAction.Undo || current.pending == EditorAction.Redo)) {
+            mutableActionState.value = current.copy(deferredClose = action)
+            return
+        }
         if (action == EditorAction.FinishText && current.busy) return
         mutableActionState.value = current.copy(pending = action)
     }
@@ -278,6 +284,7 @@ internal class EditorSessionHolder : ViewModel(), ViewModelStoreOwner {
         if (!current.ready) return null
         val action = current.pending
         mutableActionState.value = EditorActionState(
+            pending = current.deferredClose,
             executing = action?.takeIf { it is EditorAction.ImportPdf || it is EditorAction.ImportImage },
         )
         return action

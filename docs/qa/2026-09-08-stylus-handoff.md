@@ -44,7 +44,7 @@ Local evidence: `.reference/tmp/device-qa-20260908-102300-309.log`.
 - The signed version-15 APK installed as an update without clearing data. Existing text and ink remained visible. `ReleaseInkSmokeTest` reported `OK (1 test)` using native-window pixels after injected stylus input.
 - The phone returned to Home and was released at 11:22:40 CEST. No ADB operation remained active.
 
-Artifact SHA-256:
+Initial version-15 artifact SHA-256, not published:
 
 ```text
 E86C0B49BEF641390D7C703DCEBA6F587F7D52151CF0E4668455BA7D47A48030  app-release.apk
@@ -53,6 +53,25 @@ C59C0CFDA21D4A47BF32E2DA3E5C8D1D311A881A22FFD7864A4C5F0CB393B381  app-release.aa
 
 Physical active-pen pressure, tilt, latency, hover, and vendor button mappings
 remain unverified. Injected stylus events on the Huawei do not certify that hardware.
+
+## Close following Undo
+
+Android 10 CI passed, but Android 17 CI exposed a race in `immediateUndoTargetsNewestPendingInk`: two strokes remained instead of one. `requestAction` replaced a pending Undo with Back while native handoff was still suspended. Compose idleness does not guarantee native ink handoff.
+
+`EditorActionState` now retains one deferred Close behind pending Undo/Redo. The history action executes first; Close then enters the existing save barrier as a fresh action. Failed saves and new sessions discard deferred Close. Other pending-action behavior is unchanged.
+
+`EditorPendingHistoryTest` failed before this fix and passed afterward. The full JVM suite contains 100 passing tests. The final bundle uses version code 16 because Google Play had already accepted version 15 into an unpublished draft. Version 15 is not a release candidate.
+
+Before this final state fix, the Huawei broad core run reported `OK (321 tests)` with two expected opt-in skips. The signed APK passed pinch-then-stylus native-pixel verification. Broad log: `.reference/tmp/device-qa-20260908-114012-118.log`.
+
+Version 16 passed all 37 editor tests, including immediate Undo and Back, on the Huawei. Log: `.reference/tmp/device-qa-20260908-114739-648.log`. Its signed build, lint, expected signer, and 16 KB alignment passed. AAB verification returned the same documented warnings. The signed update installed without clearing data, and the phone returned to Home at 11:49:40 CEST. Android CI remains the merge gate.
+
+Final version-16 SHA-256:
+
+```text
+4803195FBAD111C35F0751F3C769865FC88F36E8A70F2BD66F21F051D326B7AF  app-release.apk
+05F97FD3BA6B96B5A3EB772994584CD259168F190F26B95C5AB4956399599B4A  app-release.aab
+```
 
 ## Previous release
 
