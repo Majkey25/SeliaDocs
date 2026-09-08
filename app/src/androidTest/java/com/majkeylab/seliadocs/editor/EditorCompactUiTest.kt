@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
@@ -18,6 +19,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.WindowSize
 import androidx.compose.ui.test.click
@@ -44,10 +46,12 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.lifecycle.ViewModelProvider
 import com.majkeylab.seliadocs.MainActivity
 import com.majkeylab.seliadocs.SeliaDocsApp
 import com.majkeylab.seliadocs.data.LibraryMutationGate
@@ -677,9 +681,30 @@ class EditorCompactUiTest {
         openEditor(widthDp = 1280)
 
         rule.onNodeWithTag("toolbar-insert").performClick()
-        rule.onNodeWithTag("toolbar-insert-text").performClick()
-        rule.waitUntil(5_000) {
-            runCatching { rule.onNodeWithTag("inline-text-placement").assertIsDisplayed() }.isSuccess
+        var menuTap = Offset.Zero
+        rule.onNodeWithTag("toolbar-insert-text").performTouchInput {
+            menuTap = center
+            click(center)
+        }
+        try {
+            rule.waitUntil(5_000) {
+                runCatching { rule.onNodeWithTag("inline-text-placement").assertIsDisplayed() }.isSuccess
+            }
+        } catch (failure: ComposeTimeoutException) {
+            val state = rule.runOnIdle {
+                val holder = if ("editor-session-holder" in rule.activity.viewModelStore.keys()) {
+                    ViewModelProvider(rule.activity)["editor-session-holder", EditorSessionHolder::class.java]
+                } else null
+                val editor = holder?.takeIf { "editor" in it.viewModelStore.keys() }?.let {
+                    ViewModelProvider(it)["editor", EditorViewModel::class.java]
+                }
+                "action=${holder?.actionState?.value}; close=${holder?.closeState?.value}; " +
+                    "draftPage=${holder?.inlineTextDraft?.value?.pageId}; " +
+                    "selectedPage=${editor?.state?.value?.selectedPage?.id}; failed=${editor?.state?.value?.failed}"
+            }
+            val placement = runCatching { rule.onNodeWithTag("inline-text-placement").printToString() }
+            val menu = runCatching { rule.onNodeWithTag("toolbar-insert-text").printToString() }
+            throw AssertionError("Text placement missing: $state\nMenu tap: $menuTap\nMenu: $menu\nPlacement: $placement", failure)
         }
         rule.onNodeWithTag("inline-text-placement").performTouchInput { click(center) }
         rule.waitUntil(5_000) {

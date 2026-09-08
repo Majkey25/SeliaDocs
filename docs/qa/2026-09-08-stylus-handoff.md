@@ -81,6 +81,10 @@ The next CI run (`34213990334`) completed all Android 17 test commands successfu
 
 The Android 17 script now preserves the original test status while collecting diagnostics and stopping its disposable CI emulator. ADB commands have TERM/KILL deadlines; the final force-stop matches only the SDK QEMU executable and this job's emulator port. Diagnostic directory failures cannot skip cleanup. Shell syntax passed locally. This changes CI cleanup only; the version-16 APK/AAB remain unchanged.
 
+That cleanup change passed Android 17 CI. Android 10 again failed the expanded text-placement test, this time while waiting for the placement overlay. The earlier readiness-only explanation was insufficient. Failure diagnostics now include the real editor action/close state, draft and selected page IDs, failure flag, and menu/placement semantics. The test still injects an actual menu tap and keeps its display assertions.
+
+Ten isolated phone repetitions passed, followed by another `OK (321 tests)` with two expected opt-in skips. Log: `.reference/tmp/device-qa-20260908-132301-086.log`. The phone was released at 13:27 CEST without changing its viewport. Publication remains gated on a clean full CI run.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing
