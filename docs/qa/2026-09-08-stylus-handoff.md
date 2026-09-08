@@ -93,6 +93,10 @@ The native tests now wait for the focused decor view before computing their init
 
 The first native-tablet run (`34221875421`) passed the native pressure/pinch stage. Its broad suite exposed three test assumptions: two recreation tests selected the compact toolbar on a wide screen, and the grid-template test tried to scroll the phone-only dialog container. The tests now choose the rendered toolbar and only perform that preliminary swipe when the phone container exists. Text persistence, save-state, and selected paper/orientation assertions remain unchanged. Local test-APK compilation and lint passed; native tablet execution remains the CI gate.
 
+The three layout corrections passed on Huawei, followed by all 46 editor/library tests. Logs: `.reference/tmp/device-qa-20260908-141219-059.log` and `.reference/tmp/device-qa-20260908-141248-909.log`. The phone was released to Home without changing its viewport or production data.
+
+Run `34224702808` passed the build, Android 10, native tablet input, and the tablet core suite. Its follow-up input suite exposed another geometry assumption in both palm-lift tests: at 2x zoom, portrait paper on a landscape tablet can be narrower than the viewport, so horizontal panning is correctly clamped to zero. The test now moves diagonally and requires a fresh finger gesture to move along an available axis. Both assertions that the resting palm must leave the page's x/y coordinates unchanged remain intact. This changes only tests; signed version-16 app artifacts remain unchanged.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing

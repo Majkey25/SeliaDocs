@@ -74,7 +74,7 @@ class PageViewportFlowTest {
         val before = visiblePaperPoint(0.5f, 0.5f)
         val palm = before + Offset(0f, 80f)
         val pen = before - Offset(0f, 80f)
-        val movedPalm = palm + Offset(90f, 0f)
+        val movedPalm = palm + Offset(90f, 90f)
         val downTime = android.os.SystemClock.uptimeMillis()
         fun event(time: Long, action: Int, palmPoint: Offset, includePen: Boolean): MotionEvent {
             val count = if (includePen) 2 else 1
@@ -116,7 +116,10 @@ class PageViewportFlowTest {
         // A new finger gesture must still navigate after the palm has lifted.
         dispatchFingerGesture(palm, movedPalm)
         compose.waitForIdle()
-        assertTrue(visiblePaperPoint(0.5f, 0.5f).x > after.x + 10f)
+        assertTrue(
+            "A fresh finger gesture must pan along an available axis",
+            (visiblePaperPoint(0.5f, 0.5f) - after).getDistance() > 10f,
+        )
     }
 
     @Test
