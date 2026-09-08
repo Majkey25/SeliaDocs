@@ -1,11 +1,16 @@
 package com.majkeylab.seliadocs.editor
 
 import android.net.Uri
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
@@ -14,6 +19,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.WindowSize
 import androidx.compose.ui.test.click
@@ -40,10 +46,12 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.lifecycle.ViewModelProvider
 import com.majkeylab.seliadocs.MainActivity
 import com.majkeylab.seliadocs.SeliaDocsApp
 import com.majkeylab.seliadocs.data.LibraryMutationGate
@@ -70,6 +78,77 @@ import org.junit.runner.RunWith
 class EditorCompactUiTest {
     @get:Rule
     val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun immediateBackWaitsForNativeInkAndPersistsTheStroke() {
+        val title = openCompactEditor()
+        drawNativeStrokeThen { rule.activity.onBackPressedDispatcher.onBackPressed() }
+        rule.waitUntil(15_000) {
+            runCatching { rule.onNodeWithContentDescription("Open $title").fetchSemanticsNode() }.isSuccess
+        }
+        runBlocking {
+            val repository = SeliaDocsRepository(SeliaDocsDatabase.get(rule.activity.application))
+            val notebook = repository.getAllNotebooks().single { it.title == title }
+            val strokes = repository.getPages(notebook.id).flatMap { repository.getStrokes(it.id) }
+            assertEquals("Back discarded or duplicated pending ink", 1, strokes.size)
+        }
+    }
+
+    @Test
+    fun immediateUndoTargetsNewestPendingInk() {
+        val title = openCompactEditor()
+        drawNativeStrokeThen {}
+        rule.waitUntil(10_000) {
+            runCatching { rule.onNodeWithTag("compact-undo").assertIsEnabled() }.isSuccess
+        }
+        val undo = requireNotNull(rule.onNodeWithTag("compact-undo").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        drawNativeStrokeThen(origin = 0.6f) { undo() }
+        rule.waitForIdle()
+        rule.onNodeWithTag("compact-back").performClick()
+        rule.waitUntil(15_000) {
+            runCatching { rule.onNodeWithContentDescription("Open $title").fetchSemanticsNode() }.isSuccess
+        }
+        runBlocking {
+            val repository = SeliaDocsRepository(SeliaDocsDatabase.get(rule.activity.application))
+            val notebook = repository.getAllNotebooks().single { it.title == title }
+            val page = repository.getPages(notebook.id).first()
+            val strokes = repository.getStrokes(page.id)
+            assertEquals(1, strokes.size)
+            assertEquals("Undo removed the preceding stroke instead of pending ink", page.widthPoints * 0.3f,
+                strokes.single().toInkStroke().inputs[0].x, 1f)
+        }
+    }
+
+    private fun drawNativeStrokeThen(origin: Float = 0.3f, action: () -> Unit) {
+        rule.runOnUiThread {
+            fun findCanvas(view: View): InkCanvasView? {
+                if (view is InkCanvasView) return view
+                if (view is ViewGroup) {
+                    repeat(view.childCount) { index ->
+                        findCanvas(view.getChildAt(index))?.let { return it }
+                    }
+                }
+                return null
+            }
+            val canvas = requireNotNull(findCanvas(rule.activity.window.decorView))
+            assertEquals(EditorTool.PEN, canvas.tool)
+            val time = android.os.SystemClock.uptimeMillis()
+            listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP).forEachIndexed { index, action ->
+                val event = MotionEvent.obtain(
+                    time, time + index * 16L, action, 1,
+                    arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS }),
+                    arrayOf(MotionEvent.PointerCoords().apply {
+                        x = canvas.width * (origin + index * 0.1f)
+                        y = canvas.height * (origin + index * 0.05f)
+                        pressure = 0.7f
+                    }),
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0,
+                )
+                try { canvas.dispatchTouchEvent(event) } finally { event.recycle() }
+            }
+            action()
+        }
+    }
 
     @Test
     fun sessionHolderRetainsSameSessionAndResetsDifferentSession() {
@@ -376,8 +455,10 @@ class EditorCompactUiTest {
     fun recreationKeepsOrSavesInlineText() {
         createAndOpenNotebook()
         val draft = "Recreated inline ${System.nanoTime()}"
-        rule.onNodeWithTag("compact-insert").performClick()
-        rule.onNodeWithTag("compact-insert-text").performClick()
+        val toolbar = if (hasTag("compact-insert")) "compact" else "toolbar"
+        rule.onNodeWithTag("$toolbar-insert").performClick()
+        rule.onNodeWithTag("$toolbar-insert-text").performClick()
+        rule.waitUntil(5_000) { hasTag("inline-text-placement") }
         rule.onNodeWithTag("page-paper").performTouchInput { click(center) }
         rule.onNodeWithTag("inline-text-editor").performTextInput(draft)
 
@@ -516,8 +597,10 @@ class EditorCompactUiTest {
     fun recreationDuringToolSaveKeepsInputDisabledAndBackSavesOnce() {
         val title = createAndOpenNotebook()
         val draft = "Retained save ${System.nanoTime()}"
-        rule.onNodeWithTag("compact-insert").performClick()
-        rule.onNodeWithTag("compact-insert-text").performClick()
+        val toolbar = if (hasTag("compact-insert")) "compact" else "toolbar"
+        rule.onNodeWithTag("$toolbar-insert").performClick()
+        rule.onNodeWithTag("$toolbar-insert-text").performClick()
+        rule.waitUntil(5_000) { hasTag("inline-text-placement") }
         rule.onNodeWithTag("page-paper").performTouchInput { click(center) }
         rule.onNodeWithTag("inline-text-editor").performTextInput(draft)
         val gateAcquired = CountDownLatch(1)
@@ -530,7 +613,7 @@ class EditorCompactUiTest {
         }
         try {
             assertTrue(gateAcquired.await(5, TimeUnit.SECONDS))
-            rule.onNodeWithTag("compact-tool-pencil").performClick()
+            rule.onNodeWithTag("$toolbar-tool-pencil").performClick()
             rule.onNodeWithTag("inline-text-editor").assertIsNotEnabled().assertTextContains(draft)
             rule.activityRule.scenario.recreate()
             rule.waitUntil(10_000) {
@@ -602,8 +685,35 @@ class EditorCompactUiTest {
         openEditor(widthDp = 1280)
 
         rule.onNodeWithTag("toolbar-insert").performClick()
-        rule.onNodeWithTag("toolbar-insert-text").performClick()
-        rule.onNodeWithTag("page-paper").performTouchInput { click(center) }
+        var menuTap = Offset.Zero
+        rule.onNodeWithTag("toolbar-insert-text").performTouchInput {
+            menuTap = center
+            click(center)
+        }
+        try {
+            rule.waitUntil(5_000) {
+                runCatching { rule.onNodeWithTag("inline-text-placement").assertIsDisplayed() }.isSuccess
+            }
+        } catch (failure: ComposeTimeoutException) {
+            val state = rule.runOnIdle {
+                val holder = if ("editor-session-holder" in rule.activity.viewModelStore.keys()) {
+                    ViewModelProvider(rule.activity)["editor-session-holder", EditorSessionHolder::class.java]
+                } else null
+                val editor = holder?.takeIf { "editor" in it.viewModelStore.keys() }?.let {
+                    ViewModelProvider(it)["editor", EditorViewModel::class.java]
+                }
+                "action=${holder?.actionState?.value}; close=${holder?.closeState?.value}; " +
+                    "draftPage=${holder?.inlineTextDraft?.value?.pageId}; " +
+                    "selectedPage=${editor?.state?.value?.selectedPage?.id}; failed=${editor?.state?.value?.failed}"
+            }
+            val placement = runCatching { rule.onNodeWithTag("inline-text-placement").printToString() }
+            val menu = runCatching { rule.onNodeWithTag("toolbar-insert-text").printToString() }
+            throw AssertionError("Text placement missing: $state\nMenu tap: $menuTap\nMenu: $menu\nPlacement: $placement", failure)
+        }
+        rule.onNodeWithTag("inline-text-placement").performTouchInput { click(center) }
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag("inline-text-editor").assertIsDisplayed() }.isSuccess
+        }
 
         rule.onNodeWithTag("inline-text-editor").assertIsDisplayed()
     }

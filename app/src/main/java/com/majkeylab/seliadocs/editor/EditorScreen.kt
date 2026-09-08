@@ -158,10 +158,13 @@ internal sealed interface EditorAction {
     data object AddPage : EditorAction
     data object PreviousPage : EditorAction
     data object NextPage : EditorAction
+    data object Undo : EditorAction
+    data object Redo : EditorAction
 }
 
 internal data class EditorActionState(
     val pending: EditorAction? = null,
+    val deferredClose: EditorAction.Close? = null,
     val saving: Boolean = false,
     val ready: Boolean = false,
     val executing: EditorAction? = null,
@@ -250,7 +253,12 @@ internal class EditorSessionHolder : ViewModel(), ViewModelStoreOwner {
     fun requestAction(action: EditorAction) {
         if (mutableCloseState.value.closing) return
         val current = mutableActionState.value
-        if (current.pending is EditorAction.Close) return
+        if (current.pending is EditorAction.Close || current.deferredClose != null) return
+        // Back must not discard a history edit waiting for native ink handoff.
+        if (action is EditorAction.Close && (current.pending == EditorAction.Undo || current.pending == EditorAction.Redo)) {
+            mutableActionState.value = current.copy(deferredClose = action)
+            return
+        }
         if (action == EditorAction.FinishText && current.busy) return
         mutableActionState.value = current.copy(pending = action)
     }
@@ -276,6 +284,7 @@ internal class EditorSessionHolder : ViewModel(), ViewModelStoreOwner {
         if (!current.ready) return null
         val action = current.pending
         mutableActionState.value = EditorActionState(
+            pending = current.deferredClose,
             executing = action?.takeIf { it is EditorAction.ImportPdf || it is EditorAction.ImportImage },
         )
         return action
@@ -395,12 +404,16 @@ private fun EditorScreen(
         }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val inkCanvases = remember { mutableSetOf<InkCanvasView>() }
     var imagePageId by rememberSaveable { mutableStateOf<String?>(null) }
     var shapeDialogOpen by remember { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var contentsOpen by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(actionState, state.selectedPage?.id) {
         if (state.selectedPage == null) return@LaunchedEffect
+        if (actionState.pending != null && !actionState.saving && !actionState.ready && actionState.executing == null) {
+            inkCanvases.toList().forEach { it.awaitPendingCommits() }
+        }
         val saveEpoch = sessionHolder.beginActionSave()
         if (saveEpoch != null) {
             val inline = sessionHolder.inlineTextDraft.value
@@ -459,6 +472,8 @@ private fun EditorScreen(
             EditorAction.AddPage -> viewModel.addPage()
             EditorAction.PreviousPage -> viewModel.selectPreviousPage()
             EditorAction.NextPage -> viewModel.selectNextPage()
+            EditorAction.Undo -> viewModel.undo()
+            EditorAction.Redo -> viewModel.redo()
             EditorAction.FinishText -> Unit
         }
     }
@@ -604,19 +619,19 @@ private fun EditorScreen(
                     }
                     when {
                         event.isCtrlPressed && event.key == Key.Z && event.isShiftPressed -> {
-                            viewModel.redo()
+                            sessionHolder.requestAction(EditorAction.Redo)
                             true
                         }
                         event.isCtrlPressed && event.key == Key.Z -> {
-                            viewModel.undo()
+                            sessionHolder.requestAction(EditorAction.Undo)
                             true
                         }
                         event.key == Key.PageUp -> {
-                            viewModel.selectPreviousPage()
+                            selectPreviousPage()
                             true
                         }
                         event.key == Key.PageDown -> {
-                            viewModel.selectNextPage()
+                            selectNextPage()
                             true
                         }
                         else -> false
@@ -630,8 +645,8 @@ private fun EditorScreen(
                             state = toolbarState,
                             onBack = { requestClose(EditorCloseIntent.BACK) },
                             onOpenContents = { contentsOpen = true },
-                            onUndo = viewModel::undo,
-                            onRedo = viewModel::redo,
+                            onUndo = { sessionHolder.requestAction(EditorAction.Undo) },
+                            onRedo = { sessionHolder.requestAction(EditorAction.Redo) },
                             onAddPage = addPage,
                             onSearch = requestSearch,
                             onFingerDrawing = viewModel::setFingerDrawing,
@@ -652,8 +667,8 @@ private fun EditorScreen(
                             state = toolbarState,
                             onSelectTool = selectTool,
                             onEraserMode = viewModel::setEraserMode,
-                            onUndo = viewModel::undo,
-                            onRedo = viewModel::redo,
+                            onUndo = { sessionHolder.requestAction(EditorAction.Undo) },
+                            onRedo = { sessionHolder.requestAction(EditorAction.Redo) },
                             onSearch = requestSearch,
                             onAddText = beginTextPlacement,
                             onAddImage = onAddImage,
@@ -766,6 +781,7 @@ private fun EditorScreen(
                         )
                         VerticalDivider()
                         PageCanvas(
+                            inkCanvases = inkCanvases,
                             page = state.selectedPage,
                             pageNumber = state.pages.indexOf(state.selectedPage) + 1,
                             pageCount = state.pages.size,
@@ -839,6 +855,7 @@ private fun EditorScreen(
                             HorizontalDivider()
                         }
                         PageCanvas(
+                            inkCanvases = inkCanvases,
                             page = state.selectedPage,
                             pageNumber = state.pages.indexOf(state.selectedPage) + 1,
                             pageCount = state.pages.size,

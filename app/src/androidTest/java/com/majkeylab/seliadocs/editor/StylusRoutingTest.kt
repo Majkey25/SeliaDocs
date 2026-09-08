@@ -1,12 +1,16 @@
 package com.majkeylab.seliadocs.editor
 
 import android.os.Build
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Matrix
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.ink.strokes.Stroke
+import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.concurrent.CountDownLatch
@@ -20,6 +24,309 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class StylusRoutingTest {
+    @Test
+    fun barrelTransitionUsesThePenPointerWhenPalmIsIndexZero() {
+        val committed = CountDownLatch(3)
+        val order = mutableListOf<String>()
+        val erased = mutableListOf<CanvasPoint>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val view = InkCanvasView(activity)
+                activity.setContentView(view, android.view.ViewGroup.LayoutParams(500, 500))
+                view.setPageSize(500, 500)
+                view.listener = object : InkCanvasView.Listener {
+                    override fun onStrokeFinished(stroke: Stroke) {
+                        assertEquals(260f, stroke.inputs[0].x, 0.1f)
+                        order += "ink"
+                        committed.countDown()
+                    }
+                    override fun onStrokeCanceled(pointerId: Int) = Unit
+                    override fun onEraseFinished(points: List<CanvasPoint>) {
+                        erased += points
+                        order += "erase"
+                        committed.countDown()
+                    }
+                }
+                view.post {
+                    val time = android.os.SystemClock.uptimeMillis()
+                    listOf(
+                        fingerEvent(time, time, MotionEvent.ACTION_DOWN, 90f, 100f),
+                        stylusAndFingerEvent(time, time + 16, pointerAction(MotionEvent.ACTION_POINTER_DOWN, 1), stylusPointerIndex = 1),
+                        stylusAndFingerEvent(time, time + 32, MotionEvent.ACTION_MOVE, stylusPointerIndex = 1, buttonState = MotionEvent.BUTTON_STYLUS_PRIMARY),
+                        stylusAndFingerEvent(time, time + 48, MotionEvent.ACTION_MOVE, stylusPointerIndex = 1),
+                        stylusAndFingerEvent(time, time + 64, pointerAction(MotionEvent.ACTION_POINTER_UP, 1), stylusPointerIndex = 1),
+                        fingerEvent(time, time + 80, MotionEvent.ACTION_UP, 90f, 100f),
+                    ).forEach { event ->
+                        try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+                    }
+                }
+            }
+            assertTrue(committed.await(10, TimeUnit.SECONDS))
+            scenario.onActivity {
+                assertEquals(listOf("ink", "erase", "ink"), order)
+                assertTrue(erased.isNotEmpty())
+                assertTrue(erased.all { it.x == 260f && it.y == 300f })
+            }
+        }
+    }
+
+    @Test
+    fun fallbackHighlighterCommitIsNotRepeatedByLateNativeHandoff() {
+        val committed = CountDownLatch(2)
+        val strokes = mutableListOf<Stroke>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val view = InkCanvasView(activity)
+                activity.setContentView(view, android.view.ViewGroup.LayoutParams(500, 500))
+                view.tool = EditorTool.HIGHLIGHTER
+                view.brush = InkCodec.createBrush(BrushKind.HIGHLIGHTER, 0x66FFD54F, 24f)
+                view.listener = object : InkCanvasView.Listener {
+                    override fun onStrokeFinished(stroke: Stroke) {
+                        strokes += stroke
+                        view.setStrokes(strokes)
+                        committed.countDown()
+                    }
+                    override fun onStrokeCanceled(pointerId: Int) = Unit
+                }
+                fun draw(y: Float) {
+                    val time = android.os.SystemClock.uptimeMillis()
+                    listOf(
+                        stylusEvent(time, time, MotionEvent.ACTION_DOWN, 40f, y),
+                        stylusEvent(time, time + 16, MotionEvent.ACTION_UP, 120f, y),
+                    ).forEach { event ->
+                        try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+                    }
+                }
+                view.post {
+                    draw(50f)
+                    view.flushPendingCommits()
+                    view.postDelayed({ draw(150f) }, 250L)
+                }
+            }
+            assertTrue(committed.await(10, TimeUnit.SECONDS))
+            scenario.onActivity {
+                assertEquals(2, strokes.size)
+                assertEquals(50f * 842f / 500f, strokes.first().inputs[0].y, 0.1f)
+                assertEquals(150f * 842f / 500f, strokes.last().inputs[0].y, 0.1f)
+            }
+        }
+    }
+
+    @Test
+    fun retainedRealInputMatchesNativeHandoffAtZoom() {
+        val committed = CountDownLatch(1)
+        val nativeStroke = AtomicReference<Stroke>()
+        val retainedStroke = AtomicReference<Stroke>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val view = InkCanvasView(activity)
+                activity.setContentView(view, android.view.ViewGroup.LayoutParams(500, 500))
+                view.setPageSize(250, 250)
+                view.listener = object : InkCanvasView.Listener {
+                    override fun onStrokeFinished(stroke: Stroke) {
+                        nativeStroke.set(stroke)
+                        committed.countDown()
+                    }
+                    override fun onStrokeCanceled(pointerId: Int) = Unit
+                }
+                view.post {
+                    val time = android.os.SystemClock.uptimeMillis()
+                    val down = stylusEvent(time - 100, time, MotionEvent.ACTION_DOWN, 40f, 50f)
+                    val move = stylusEvent(time - 100, time, MotionEvent.ACTION_MOVE, 80f, 90f)
+                    move.addBatch(time + 16, arrayOf(MotionEvent.PointerCoords().apply {
+                        x = 100f
+                        y = 110f
+                        pressure = 0.7f
+                    }), 0)
+                    val up = stylusEvent(time - 100, time + 48, MotionEvent.ACTION_UP, 120f, 130f)
+                    try {
+                        val capture = InkInputCapture(down, 0, view.brush, Matrix().apply {
+                            setScale(0.5f, 0.5f)
+                        }, view)
+                        view.dispatchTouchEvent(down)
+                        capture.add(move, 0)
+                        view.dispatchTouchEvent(move)
+                        capture.add(up, 0, includeHistory = false)
+                        view.dispatchTouchEvent(up)
+                        retainedStroke.set(capture.toStroke())
+                    } finally {
+                        down.recycle()
+                        move.recycle()
+                        up.recycle()
+                    }
+                }
+            }
+            assertTrue(committed.await(10, TimeUnit.SECONDS))
+            val native = requireNotNull(nativeStroke.get())
+            val retained = requireNotNull(retainedStroke.get())
+            assertEquals("Same-millisecond movement or history was dropped", 4, native.inputs.size)
+            assertEquals(native.inputs.size, retained.inputs.size)
+            repeat(native.inputs.size) { index ->
+                val expected = native.inputs[index]
+                val actual = retained.inputs[index]
+                assertEquals(expected.x, actual.x, 0.001f)
+                assertEquals(expected.y, actual.y, 0.001f)
+                assertEquals(expected.elapsedTimeMillis, actual.elapsedTimeMillis)
+                assertEquals(expected.strokeUnitLengthCm, actual.strokeUnitLengthCm, 0.00001f)
+                assertEquals(expected.pressure, actual.pressure, 0f)
+                assertEquals(expected.tiltRadians, actual.tiltRadians, 0f)
+                assertEquals(expected.orientationRadians, actual.orientationRadians, 0f)
+            }
+            val nativeBitmap = Bitmap.createBitmap(250, 250, Bitmap.Config.ARGB_8888)
+            val retainedBitmap = Bitmap.createBitmap(250, 250, Bitmap.Config.ARGB_8888)
+            try {
+                val renderer = CanvasStrokeRenderer.create()
+                renderer.draw(Canvas(nativeBitmap), native, Matrix())
+                renderer.draw(Canvas(retainedBitmap), retained, Matrix())
+                assertTrue("Retained stroke rendered differently", nativeBitmap.sameAs(retainedBitmap))
+            } finally {
+                nativeBitmap.recycle()
+                retainedBitmap.recycle()
+            }
+        }
+    }
+
+    @Test
+    fun flushingThenDetachingCommitsFinishedInkOnlyOnce() {
+        val committed = CountDownLatch(1)
+        val strokes = mutableListOf<Stroke>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val parent = FrameLayout(activity)
+                val view = InkCanvasView(activity)
+                parent.addView(view, FrameLayout.LayoutParams(500, 500))
+                activity.setContentView(parent)
+                view.listener = object : InkCanvasView.Listener {
+                    override fun onStrokeFinished(stroke: Stroke) {
+                        strokes += stroke
+                        committed.countDown()
+                    }
+                    override fun onStrokeCanceled(pointerId: Int) = Unit
+                }
+                view.post {
+                    val time = android.os.SystemClock.uptimeMillis()
+                    listOf(
+                        stylusEvent(time, time, MotionEvent.ACTION_DOWN, 40f, 50f),
+                        stylusEvent(time, time + 16, MotionEvent.ACTION_UP, 80f, 90f),
+                        stylusEvent(time + 32, time + 32, MotionEvent.ACTION_DOWN, 140f, 150f),
+                    ).forEach { event ->
+                        try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+                    }
+                    view.flushPendingCommits()
+                    view.flushPendingCommits()
+                    parent.removeView(view)
+                    assertEquals(1, strokes.size)
+                }
+            }
+            assertTrue(committed.await(10, TimeUnit.SECONDS))
+            scenario.onActivity { assertEquals(1, strokes.size) }
+        }
+    }
+
+    @Test
+    fun barrelButtonMovesPreserveInkEraseInkOrder() {
+        assertBarrelTransitions(genericButtons = false)
+    }
+
+    @Test
+    fun genericBarrelButtonsPreserveInkEraseInkOrder() {
+        assertBarrelTransitions(genericButtons = true)
+    }
+
+    @Test
+    fun completedStrokeSurvivesImmediateCanvasDetach() {
+        val committed = CountDownLatch(1)
+        val finished = AtomicReference<Stroke>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val parent = FrameLayout(activity)
+                val view = InkCanvasView(activity)
+                parent.addView(view, FrameLayout.LayoutParams(500, 500))
+                activity.setContentView(parent)
+                view.listener = object : InkCanvasView.Listener {
+                    override fun onStrokeFinished(stroke: Stroke) {
+                        finished.set(stroke)
+                        committed.countDown()
+                    }
+                    override fun onStrokeCanceled(pointerId: Int) = Unit
+                }
+                view.post {
+                    val time = android.os.SystemClock.uptimeMillis()
+                    listOf(
+                        stylusEvent(time, time, MotionEvent.ACTION_DOWN, 40f, 50f),
+                        stylusEvent(time, time + 16, MotionEvent.ACTION_MOVE, 80f, 90f),
+                        stylusEvent(time, time + 32, MotionEvent.ACTION_UP, 120f, 130f),
+                    ).forEach { event ->
+                        try { view.dispatchTouchEvent(event) } finally { event.recycle() }
+                    }
+                    parent.removeView(view)
+                }
+            }
+            assertTrue("A finished stroke was lost on detach", committed.await(10, TimeUnit.SECONDS))
+            assertTrue(requireNotNull(finished.get()).inputs.size >= 2)
+        }
+    }
+
+    private fun assertBarrelTransitions(genericButtons: Boolean) {
+        listOf(MotionEvent.BUTTON_STYLUS_PRIMARY, MotionEvent.BUTTON_STYLUS_SECONDARY).forEach { button ->
+            val committed = CountDownLatch(3)
+            val order = mutableListOf<String>()
+            val strokes = mutableListOf<Stroke>()
+            val erased = mutableListOf<CanvasPoint>()
+            ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val view = InkCanvasView(activity)
+                    activity.setContentView(view, android.view.ViewGroup.LayoutParams(500, 500))
+                    view.setPageSize(500, 500)
+                    view.listener = object : InkCanvasView.Listener {
+                        override fun onStrokeFinished(stroke: Stroke) {
+                            order += "ink"
+                            strokes += stroke
+                            committed.countDown()
+                        }
+                        override fun onStrokeCanceled(pointerId: Int) = Unit
+                        override fun onEraseFinished(points: List<CanvasPoint>) {
+                            order += "erase"
+                            erased += points
+                            committed.countDown()
+                        }
+                    }
+                    view.post {
+                        val time = android.os.SystemClock.uptimeMillis()
+                        val press = if (genericButtons) MotionEvent.ACTION_BUTTON_PRESS else MotionEvent.ACTION_MOVE
+                        val release = if (genericButtons) MotionEvent.ACTION_BUTTON_RELEASE else MotionEvent.ACTION_MOVE
+                        listOf(
+                            stylusEvent(time, time, MotionEvent.ACTION_DOWN, 40f, 50f),
+                            stylusEvent(time, time + 16, MotionEvent.ACTION_MOVE, 80f, 50f),
+                            stylusEvent(time, time + 16, press, 80f, 50f, buttonState = button),
+                            stylusEvent(time, time + 48, MotionEvent.ACTION_MOVE, 120f, 50f, buttonState = button),
+                            stylusEvent(time, time + 64, release, 160f, 50f),
+                            stylusEvent(time, time + 80, MotionEvent.ACTION_MOVE, 200f, 50f),
+                            stylusEvent(time, time + 96, MotionEvent.ACTION_UP, 240f, 50f),
+                        ).forEach { event ->
+                            try {
+                                if (event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS ||
+                                    event.actionMasked == MotionEvent.ACTION_BUTTON_RELEASE) {
+                                    view.dispatchGenericMotionEvent(event)
+                                } else view.dispatchTouchEvent(event)
+                            } finally { event.recycle() }
+                        }
+                        assertEquals(EditorTool.PEN, view.tool)
+                    }
+                }
+                val completed = committed.await(10, TimeUnit.SECONDS)
+                assertTrue("Missing button handoff: $button $order", completed)
+                scenario.onActivity {
+                    assertEquals(listOf("ink", "erase", "ink"), order)
+                    assertEquals(80f, strokes.first().inputs[strokes.first().inputs.size - 1].x, 0.1f)
+                    assertEquals(160f, strokes.last().inputs[0].x, 0.1f)
+                    assertEquals(80f, erased.first().x, 0.1f)
+                    assertEquals(160f, erased.last().x, 0.1f)
+                }
+            }
+        }
+    }
+
     @Test
     fun stylusHoverPreviewFollowsHoverLifecycleWithoutCommittingInk() {
         val finished = mutableListOf<Stroke>()
@@ -953,6 +1260,7 @@ class StylusRoutingTest {
         flags: Int = 0,
         stylusPointerIndex: Int = 0,
         stylusToolType: Int = MotionEvent.TOOL_TYPE_STYLUS,
+        buttonState: Int = 0,
     ): MotionEvent {
         val toolTypes =
             if (stylusPointerIndex == 0) {
@@ -990,7 +1298,7 @@ class StylusRoutingTest {
             properties,
             coordinates,
             0,
-            0,
+            buttonState,
             1f,
             1f,
             0,
