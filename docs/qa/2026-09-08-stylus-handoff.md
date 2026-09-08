@@ -77,6 +77,10 @@ Android 17 CI passed on commit `6e49bc8`, including native pressure/pinch input 
 
 The corrected test, compact text placement, immediate Undo, and immediate Back passed on the Huawei: `OK (4 tests)`, log `.reference/tmp/device-qa-20260908-120800-636.log`. Signed version 16 also passed native-window pixel checks for pinch followed by stylus input and for stylus input after Home/resume. The phone was released at 12:09:15 CEST; only its two temporary capture files were removed.
 
+The next CI run (`34213990334`) completed all Android 17 test commands successfully but stalled after `adb emu kill` acknowledged shutdown. The pinned runner awaits that command without a timeout. The stalled job was canceled after several minutes of cleanup-only waiting.
+
+The Android 17 script now preserves the original test status while collecting diagnostics and stopping its disposable CI emulator. ADB commands have TERM/KILL deadlines; the final force-stop matches only the SDK QEMU executable and this job's emulator port. Diagnostic directory failures cannot skip cleanup. Shell syntax passed locally. This changes CI cleanup only; the version-16 APK/AAB remain unchanged.
+
 ## Previous release
 
 Play Console on September 8 showed `14 (0.6.1-beta.1)` available in the existing
