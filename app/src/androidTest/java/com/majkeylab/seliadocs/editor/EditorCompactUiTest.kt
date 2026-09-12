@@ -84,7 +84,7 @@ class EditorCompactUiTest {
     @Test
     fun savedHighlighterStaysVisibleWithoutSwitchingTools() {
         val title = openCompactEditor()
-        rule.onNodeWithTag("compact-tool-highlighter").performClick().assertIsSelected()
+        selectTool("highlighter")
         val paper = rule.onNodeWithTag("page-paper").fetchSemanticsNode().boundsInRoot
         val offset = IntArray(2)
         rule.runOnUiThread {
@@ -827,7 +827,7 @@ class EditorCompactUiTest {
             }.isSuccess
         }
         rule.onNodeWithTag("compact-page-location").assertTextContains("Page 2 of 2")
-        selectTypeTool()
+        selectTool("type")
 
         rule.onNodeWithTag("page-text").performKeyInput { pressKey(Key.PageUp) }
 
@@ -908,7 +908,7 @@ class EditorCompactUiTest {
     fun recreationRetainsDraftAndSystemBackWaitsForFlush() {
         val title = createAndOpenNotebook()
         val draft = "Draft ${System.nanoTime()}"
-        selectTypeTool()
+        selectTool("type")
         rule.waitUntil(5_000) {
             runCatching {
                 rule.onNodeWithTag("page-text").assertIsDisplayed().fetchSemanticsNode()
@@ -966,7 +966,7 @@ class EditorCompactUiTest {
                 }.isSuccess
             }
             rule.onNodeWithContentDescription("Open $title").performClick()
-            selectTypeTool()
+            selectTool("type")
             rule.waitUntil(15_000) {
                 runCatching { rule.onNodeWithTag("page-text").fetchSemanticsNode() }.isSuccess
             }
@@ -978,9 +978,13 @@ class EditorCompactUiTest {
         }
     }
 
-    private fun selectTypeTool() {
-        val tag = if (hasTag("compact-tool-type")) "compact-tool-type" else "toolbar-tool-type"
-        rule.onNodeWithTag(tag).performClick().assertIsSelected()
+    private fun selectTool(tool: String) {
+        val tag = if (hasTag("compact-tool-$tool")) "compact-tool-$tool" else "toolbar-tool-$tool"
+        rule.onNodeWithTag(tag).performClick()
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag(tag).assertIsSelected() }.isSuccess
+        }
+        rule.onNodeWithTag(tag).assertIsSelected()
     }
 
     private fun addPageFromEditor() {

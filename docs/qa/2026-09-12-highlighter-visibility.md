@@ -20,7 +20,11 @@ Local evidence:
 
 `InkCanvasView` keeps its page-sized input and completed-stroke layer. Only `InProgressStrokesView` is measured and positioned within the intersection of the page and viewport. `motionEventToViewTransform` translates incoming page-view coordinates into that smaller live surface. Stored brush inputs, eraser/lasso coordinates, and backup formats are unchanged.
 
-The original three pixel checks passed after this change. Both pan-direction checks also passed. Logs: `.reference/tmp/device-qa-20260912-105641-012.log` and `.reference/tmp/device-qa-20260912-105934-830.log`. Temporary production coordinate logging was removed. Local compilation, JVM tests, and lint passed before the version-code bump. Candidate version 17 still requires the full release checks.
+The original three pixel checks passed after this change. Both pan-direction checks also passed. Logs: `.reference/tmp/device-qa-20260912-105641-012.log` and `.reference/tmp/device-qa-20260912-105934-830.log`. Temporary production coordinate logging was removed.
+
+Version 17 passed 100 JVM tests, lint, the signed build, the expected signer check, and 16 KB APK alignment. AAB verification returned the existing self-signed, timestamp, POSIX, and JAR stream-order warnings. Huawei reported `OK (322 tests)` for the core suite and `OK (57 tests)` for the input suite, with two and three expected opt-in/API skips respectively. Logs: `.reference/tmp/device-qa-20260912-111713-000.log` and `.reference/tmp/device-qa-20260912-112111-260.log`. The signed update preserved existing text/ink and passed the pinch-before-stylus pixel smoke test.
+
+Android 10 CI passed on `cb2afcc`. Android 17 passed its native pressure/pinch stage but found an existing synchronous-selection assumption in `recreationRetainsDraftAndSystemBackWaitsForFlush`. The helper now waits for the asynchronous tool selection, retaining the disabled-input, draft-retention, and saved-text assertions. Final CI and publication results are recorded in [PR #27](https://github.com/Majkey25/SeliaSheets/pull/27) and the release notes.
 
 These are injected stylus tests on a physical phone, not physical active-pen pressure, tilt, or vendor-button certification.
 
