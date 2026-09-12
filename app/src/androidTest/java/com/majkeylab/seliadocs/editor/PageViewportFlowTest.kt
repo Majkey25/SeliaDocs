@@ -45,6 +45,120 @@ class PageViewportFlowTest {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
+    fun highlighterIsVisibleBeforeLiftAndAfterHandoffWithoutChangingTools() {
+        assertHighlighterVisibleAtZoom(1f)
+    }
+
+    @Test
+    fun zoomedHighlighterIsVisibleBeforeLiftAndAfterHandoffWithoutChangingTools() {
+        assertHighlighterVisibleAtZoom(2f)
+    }
+
+    @Test
+    fun pannedHighlighterStaysUnderThePen() {
+        assertHighlighterVisibleAtZoom(2f, panX = 120f, panY = -80f)
+    }
+
+    @Test
+    fun oppositelyPannedHighlighterStaysUnderThePen() {
+        assertHighlighterVisibleAtZoom(2f, panX = -120f, panY = 80f)
+    }
+
+    @Test
+    fun highlighterStaysUnderThePenAfterPinching() {
+        assertHighlighterVisibleAtZoom(1f, pinchFirst = true)
+    }
+
+    @Test
+    fun highlighterDoesNotBleedOutsideThePaper() {
+        assertHighlighterVisibleAtZoom(1f, checkPaperClip = true)
+    }
+
+    @Test
+    fun pinchingKeepsTheLiveSurfaceSizeStable() {
+        renderPage(EditorTool.HIGHLIGHTER)
+        fun surfaceSize() = compose.runOnIdle {
+            val canvas = requireNotNull(findInkCanvas(compose.activity.window.decorView))
+            val live = (0 until canvas.childCount).map(canvas::getChildAt)
+                .filterIsInstance<androidx.ink.authoring.InProgressStrokesView>().single()
+            live.width to live.height
+        }
+        val before = surfaceSize()
+        pinchToMaximumZoom()
+        assertEquals("Pinch must transform ink without replacing its render buffers", before, surfaceSize())
+    }
+
+    private fun assertHighlighterVisibleAtZoom(
+        zoom: Float,
+        panX: Float = 0f,
+        panY: Float = 0f,
+        pinchFirst: Boolean = false,
+        checkPaperClip: Boolean = false,
+    ) {
+        val finished = AtomicReference<Stroke>()
+        renderPage(
+            EditorTool.HIGHLIGHTER,
+            page = PageEntity("page", "notebook", 0, PaperTemplate.BLANK.name, 595, 842),
+            initialViewport = PageViewport(zoom = zoom, panX = panX, panY = panY),
+            onStrokeFinished = finished::set,
+        )
+        if (pinchFirst) pinchToMaximumZoom()
+        waitForNativeInputReady()
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val sample = screenPaperPoint(0.5f, 0.4f)
+        fun blue(point: Offset = sample): Int {
+            val bitmap = requireNotNull(automation.takeScreenshot())
+            return try {
+                android.graphics.Color.blue(bitmap.getPixel(point.x.roundToInt(), point.y.roundToInt()))
+            } finally {
+                bitmap.recycle()
+            }
+        }
+        val before = blue()
+        val outside = if (checkPaperClip) screenPaperPoint(1.02f, 0.4f) else null
+        val outsideBefore = outside?.let { blue(it) }
+        val start = screenPaperPoint(0.4f, 0.4f)
+        val end = screenPaperPoint(if (checkPaperClip) 1.02f else 0.6f, 0.4f)
+        fun inject(event: MotionEvent) {
+            try {
+                assertTrue("Native stylus input was rejected", automation.injectInputEvent(event, true))
+            } finally {
+                event.recycle()
+            }
+        }
+        val time = android.os.SystemClock.uptimeMillis()
+        inject(stylusEvent(time, time, MotionEvent.ACTION_DOWN, start.x, start.y))
+        try {
+            repeat(10) { index ->
+                val point = start + (end - start) * ((index + 1) / 10f)
+                inject(stylusEvent(time, time + (index + 1) * 16, MotionEvent.ACTION_MOVE, point.x, point.y))
+            }
+            compose.waitUntil(5_000) { blue() < before - 15 }
+            if (outside != null) assertEquals("Live ink crossed the paper edge", outsideBefore, blue(outside))
+        } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+            val bitmap = requireNotNull(automation.takeScreenshot())
+            try {
+                File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null),
+                    "highlighter-zoom-${zoom.toInt()}.png").outputStream().use {
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+            } finally {
+                bitmap.recycle()
+            }
+            throw AssertionError("Invisible wet highlighter: initialZoom=$zoom pinchFirst=$pinchFirst start=$start end=$end sample=$sample before=$before after=${blue()}", failure)
+        } finally {
+            inject(stylusEvent(time, time + 176, MotionEvent.ACTION_UP, end.x, end.y))
+        }
+        compose.waitUntil(10_000) { finished.get() != null }
+        val first = requireNotNull(finished.get()).inputs[0]
+        assertEquals(595f * 0.4f, first.x, 2f)
+        assertEquals(842f * 0.4f, first.y, 2f)
+        automation.waitForIdle(100, 2_000)
+        compose.waitUntil(5_000) { blue() < before - 15 }
+        if (outside != null) assertEquals("Finished ink crossed the paper edge", outsideBefore, blue(outside))
+    }
+
+    @Test
     fun pagePenCommitsWithTheFullRangePressureBrush() {
         val finished = AtomicReference<Stroke>()
         renderPage(EditorTool.PEN, onStrokeFinished = finished::set)

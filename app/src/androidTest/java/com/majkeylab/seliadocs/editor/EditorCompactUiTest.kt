@@ -1,6 +1,7 @@
 package com.majkeylab.seliadocs.editor
 
 import android.net.Uri
+import android.graphics.Color
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
@@ -51,6 +52,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.lifecycle.ViewModelProvider
 import com.majkeylab.seliadocs.MainActivity
 import com.majkeylab.seliadocs.SeliaDocsApp
@@ -78,6 +80,37 @@ import org.junit.runner.RunWith
 class EditorCompactUiTest {
     @get:Rule
     val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun savedHighlighterStaysVisibleWithoutSwitchingTools() {
+        val title = openCompactEditor()
+        selectTool("highlighter")
+        val paper = rule.onNodeWithTag("page-paper").fetchSemanticsNode().boundsInRoot
+        val offset = IntArray(2)
+        rule.runOnUiThread {
+            rule.activity.findViewById<View>(android.R.id.content).getLocationOnScreen(offset)
+        }
+        val x = (offset[0] + paper.left + paper.width * 0.4f).toInt()
+        val y = (offset[1] + paper.top + paper.height * 0.35f).toInt()
+        fun blue(): Int {
+            val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+            return try { Color.blue(bitmap.getPixel(x, y)) } finally { bitmap.recycle() }
+        }
+        val before = blue()
+        drawNativeStrokeThen(expectedTool = EditorTool.HIGHLIGHTER) {}
+        rule.waitUntil(10_000) {
+            runCatching { rule.onNodeWithTag("compact-undo").assertIsEnabled() }.isSuccess
+        }
+        rule.onNodeWithTag("compact-tool-highlighter").assertIsSelected()
+        rule.waitUntil(5_000) { blue() < before - 15 }
+        runBlocking {
+            val repository = SeliaDocsRepository(SeliaDocsDatabase.get(rule.activity.application))
+            val notebook = repository.getAllNotebooks().single { it.title == title }
+            val strokes = repository.getPages(notebook.id).flatMap { repository.getStrokes(it.id) }
+            assertEquals(1, strokes.size)
+            assertEquals(BrushKind.HIGHLIGHTER.name, strokes.single().brushKind)
+        }
+    }
 
     @Test
     fun immediateBackWaitsForNativeInkAndPersistsTheStroke() {
@@ -119,7 +152,11 @@ class EditorCompactUiTest {
         }
     }
 
-    private fun drawNativeStrokeThen(origin: Float = 0.3f, action: () -> Unit) {
+    private fun drawNativeStrokeThen(
+        origin: Float = 0.3f,
+        expectedTool: EditorTool = EditorTool.PEN,
+        action: () -> Unit,
+    ) {
         rule.runOnUiThread {
             fun findCanvas(view: View): InkCanvasView? {
                 if (view is InkCanvasView) return view
@@ -131,7 +168,7 @@ class EditorCompactUiTest {
                 return null
             }
             val canvas = requireNotNull(findCanvas(rule.activity.window.decorView))
-            assertEquals(EditorTool.PEN, canvas.tool)
+            assertEquals(expectedTool, canvas.tool)
             val time = android.os.SystemClock.uptimeMillis()
             listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP).forEachIndexed { index, action ->
                 val event = MotionEvent.obtain(
@@ -790,7 +827,7 @@ class EditorCompactUiTest {
             }.isSuccess
         }
         rule.onNodeWithTag("compact-page-location").assertTextContains("Page 2 of 2")
-        selectTypeTool()
+        selectTool("type")
 
         rule.onNodeWithTag("page-text").performKeyInput { pressKey(Key.PageUp) }
 
@@ -871,7 +908,7 @@ class EditorCompactUiTest {
     fun recreationRetainsDraftAndSystemBackWaitsForFlush() {
         val title = createAndOpenNotebook()
         val draft = "Draft ${System.nanoTime()}"
-        selectTypeTool()
+        selectTool("type")
         rule.waitUntil(5_000) {
             runCatching {
                 rule.onNodeWithTag("page-text").assertIsDisplayed().fetchSemanticsNode()
@@ -929,7 +966,7 @@ class EditorCompactUiTest {
                 }.isSuccess
             }
             rule.onNodeWithContentDescription("Open $title").performClick()
-            selectTypeTool()
+            selectTool("type")
             rule.waitUntil(15_000) {
                 runCatching { rule.onNodeWithTag("page-text").fetchSemanticsNode() }.isSuccess
             }
@@ -941,9 +978,13 @@ class EditorCompactUiTest {
         }
     }
 
-    private fun selectTypeTool() {
-        val tag = if (hasTag("compact-tool-type")) "compact-tool-type" else "toolbar-tool-type"
-        rule.onNodeWithTag(tag).performClick().assertIsSelected()
+    private fun selectTool(tool: String) {
+        val tag = if (hasTag("compact-tool-$tool")) "compact-tool-$tool" else "toolbar-tool-$tool"
+        rule.onNodeWithTag(tag).performClick()
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag(tag).assertIsSelected() }.isSuccess
+        }
+        rule.onNodeWithTag(tag).assertIsSelected()
     }
 
     private fun addPageFromEditor() {

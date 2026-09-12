@@ -54,6 +54,8 @@ The default release bundle is unsigned. Publication uses an external upload keys
 
 ## Verification
 
+Live highlighter checks compare native screen pixels before pen-up and after handoff at fit, zoom, pan, and after pinching. A separate editor test checks visibility after saving without a tool switch. See the [highlighter regression record](docs/qa/2026-09-12-highlighter-visibility.md).
+
 `0.6.2-beta.1` handles barrel-button changes while writing and preserves pending ink before Back, Undo, and page navigation. Huawei runs reported 58 input tests and 77 nearby editor tests, with overlap and three expected input/API skips. The signed APK passed a native-window ink pixel check; 100 JVM tests passed. See the [verification record](docs/qa/2026-09-08-stylus-handoff.md) for evidence and limits. Physical active-pen hardware still requires a compatible test device. Format-5 backups require an updated reader; formats 1–4 remain readable.
 
 ## Scope

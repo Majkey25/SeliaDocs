@@ -629,6 +629,10 @@ private fun Paper(
                     update = { view ->
                         view.isEnabled = pageTextInputEnabled && isCurrentPage()
                         view.setPageSize(page.widthPoints, page.heightPoints)
+                        view.setVisibleViewport(
+                            viewportWidthPx.roundToInt(), viewportHeightPx.roundToInt(),
+                            viewportPanX, viewportPanY,
+                        )
                         view.fingerDrawing = fingerDrawing
                         view.tool = tool
                         view.brush = activeBrush

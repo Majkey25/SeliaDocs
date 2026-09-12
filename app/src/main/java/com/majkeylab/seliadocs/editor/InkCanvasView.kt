@@ -7,6 +7,7 @@ import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -19,6 +20,7 @@ import androidx.ink.rendering.android.view.ViewStrokeRenderer
 import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
 import kotlinx.coroutines.CompletableDeferred
+import kotlin.math.roundToInt
 
 internal enum class EditorTool { TYPE, PEN, PENCIL, HIGHLIGHTER, ERASER, LASSO }
 
@@ -72,6 +74,11 @@ internal class InkCanvasView @JvmOverloads constructor(
     private var pendingCommit: CompletableDeferred<Unit>? = null
     private val gesturePoints = mutableListOf<CanvasPoint>()
     private val identity = Matrix()
+    private val liveBounds = Rect()
+    private var viewportWidth = 0
+    private var viewportHeight = 0
+    private var viewportPanX = 0f
+    private var viewportPanY = 0f
     private val touchListener = OnTouchListener { _, event -> handleMotionEvent(event) }
     private var gesturePointerId: Int? = null
     private var gestureKind: GestureKind? = null
@@ -110,6 +117,52 @@ internal class InkCanvasView @JvmOverloads constructor(
         pageHeight = height.toFloat()
         finishedView.setPageSize(pageWidth, pageHeight)
         gestureOverlay.setPageSize(pageWidth, pageHeight)
+    }
+
+    fun setVisibleViewport(width: Int, height: Int, panX: Float, panY: Float) {
+        require(width >= 0 && height >= 0 && panX.isFinite() && panY.isFinite())
+        if (viewportWidth == width && viewportHeight == height && viewportPanX == panX && viewportPanY == panY) return
+        viewportWidth = width
+        viewportHeight = height
+        viewportPanX = panX
+        viewportPanY = panY
+        requestLayout()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        liveBounds.set(0, 0, measuredWidth, measuredHeight)
+        if (viewportWidth > 0 && viewportHeight > 0) {
+            val x = ((measuredWidth - viewportWidth) / 2f - viewportPanX).roundToInt()
+            val y = ((measuredHeight - viewportHeight) / 2f - viewportPanY).roundToInt()
+            liveBounds.set(x, y, x + viewportWidth, y + viewportHeight)
+        }
+        inProgressView.measure(
+            MeasureSpec.makeMeasureSpec(liveBounds.width(), MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(liveBounds.height(), MeasureSpec.EXACTLY),
+        )
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        inProgressView.layout(liveBounds.left, liveBounds.top, liveBounds.right, liveBounds.bottom)
+        // Zoom moves the viewport over the page without reallocating the live render buffers.
+        inProgressView.motionEventToViewTransform = Matrix().apply {
+            setTranslate(-liveBounds.left.toFloat(), -liveBounds.top.toFloat())
+        }
+        // Separate rectangles avoid the even-odd CLEAR-path failure observed on Huawei Android 10.
+        inProgressView.maskPath = Path().apply {
+            val w = liveBounds.width().toFloat()
+            val h = liveBounds.height().toFloat()
+            val pageLeft = (-liveBounds.left).toFloat().coerceIn(0f, w)
+            val pageTop = (-liveBounds.top).toFloat().coerceIn(0f, h)
+            val pageRight = (width - liveBounds.left).toFloat().coerceIn(0f, w)
+            val pageBottom = (height - liveBounds.top).toFloat().coerceIn(0f, h)
+            addRect(0f, 0f, w, pageTop, Path.Direction.CW)
+            addRect(0f, pageBottom, w, h, Path.Direction.CW)
+            addRect(0f, pageTop, pageLeft, pageBottom, Path.Direction.CW)
+            addRect(pageRight, pageTop, w, pageBottom, Path.Direction.CW)
+        }
     }
 
     fun dispatchScreenMotionEvent(event: MotionEvent): Boolean {

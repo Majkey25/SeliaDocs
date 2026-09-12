@@ -2,6 +2,13 @@
 
 All notable changes to SeliaSheets are documented here.
 
+## [0.6.3-beta.1] - 2026-09-12
+
+### Fixed
+
+- Live ink stays under the pen on zoomed and panned pages. The low-latency drawing surface is limited to the visible viewport without changing stored stroke coordinates.
+- Native screen-pixel regressions cover highlighter visibility before pen-up, after handoff, and after saving without switching tools.
+
 ## [0.6.2-beta.1] - 2026-09-08
 
 ### Fixed
