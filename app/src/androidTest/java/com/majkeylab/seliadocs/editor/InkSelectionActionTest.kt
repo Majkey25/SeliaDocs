@@ -79,7 +79,9 @@ class InkSelectionActionTest {
 
             onMain(viewModel::deleteSelectedStrokes)
 
-            val deleted = viewModel.awaitState("selected ink deleted") { it.selectedStrokes.size == 1 }
+            val deleted = viewModel.awaitState("selected ink deleted and undoable") {
+                it.selectedStrokes.size == 1 && it.selectedStrokeIds.isEmpty() && it.canUndo
+            }
             assertEquals(keptId, deleted.selectedStrokes.single().id)
             assertTrue(deleted.selectedStrokeIds.isEmpty())
 
