@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TextMarkEntity::class,
         PdfSourceEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 internal abstract class SeliaDocsDatabase : RoomDatabase() {
@@ -134,6 +134,16 @@ internal abstract class SeliaDocsDatabase : RoomDatabase() {
                 }
             }
 
+        val MIGRATION_4_5 =
+            object : Migration(4, 5) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE elements ADD COLUMN colorArgb INTEGER")
+                    db.execSQL("ALTER TABLE elements ADD COLUMN annotationRects TEXT")
+                    db.execSQL("ALTER TABLE elements ADD COLUMN sourcePageId TEXT")
+                    db.execSQL("ALTER TABLE elements ADD COLUMN sourceRect TEXT")
+                }
+            }
+
         fun get(context: Context): SeliaDocsDatabase =
             instance
                 ?: synchronized(this) {
@@ -143,7 +153,7 @@ internal abstract class SeliaDocsDatabase : RoomDatabase() {
                             SeliaDocsDatabase::class.java,
                             FILE_NAME,
                         )
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                             .build()
                             .also { instance = it }
                 }

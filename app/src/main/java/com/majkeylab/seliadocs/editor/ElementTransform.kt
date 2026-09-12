@@ -5,6 +5,7 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import com.majkeylab.seliadocs.data.ElementEntity
+import com.majkeylab.seliadocs.data.ElementKind
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.min
@@ -90,21 +91,26 @@ internal fun clampElementTransform(
     pageHeight: Float,
     minimumSize: Float = 24f,
 ): ElementTransform? {
-    if (!proposed.isFinite()) return null
-    var width = proposed.width.coerceIn(minimumSize, pageWidth)
-    var height = proposed.height.coerceIn(minimumSize, pageHeight)
+    if (!proposed.isFinite() || !pageWidth.isFinite() || !pageHeight.isFinite() ||
+        !minimumSize.isFinite() || pageWidth <= 0f || pageHeight <= 0f || minimumSize <= 0f
+    ) return null
+    val minimumWidth = min(minimumSize, pageWidth)
+    val minimumHeight = min(minimumSize, pageHeight)
+    var width = proposed.width.coerceIn(minimumWidth, pageWidth)
+    var height = proposed.height.coerceIn(minimumHeight, pageHeight)
     val rotation = ((proposed.rotation % 360f) + 360f) % 360f
     var (extentX, extentY) = rotatedExtents(width, height, rotation)
     val scale = min(1f, min(pageWidth / (extentX * 2f), pageHeight / (extentY * 2f)))
     if (scale < 1f) {
-        width = (width * scale).coerceAtLeast(minimumSize.coerceAtMost(pageWidth))
-        height = (height * scale).coerceAtLeast(minimumSize.coerceAtMost(pageHeight))
+        width *= scale
+        height *= scale
+        if (width <= 0f || height <= 0f) return null
         val extents = rotatedExtents(width, height, rotation)
-        extentX = extents.first
-        extentY = extents.second
+        extentX = min(extents.first, pageWidth / 2f)
+        extentY = min(extents.second, pageHeight / 2f)
     }
-    val centerX = (proposed.x + proposed.width.coerceAtLeast(minimumSize) / 2f).coerceIn(extentX, pageWidth - extentX)
-    val centerY = (proposed.y + proposed.height.coerceAtLeast(minimumSize) / 2f).coerceIn(extentY, pageHeight - extentY)
+    val centerX = (proposed.x + proposed.width.coerceAtLeast(minimumWidth) / 2f).coerceIn(extentX, pageWidth - extentX)
+    val centerY = (proposed.y + proposed.height.coerceAtLeast(minimumHeight) / 2f).coerceIn(extentY, pageHeight - extentY)
     return proposed.copy(
         x = centerX - width / 2f,
         y = centerY - height / 2f,
@@ -160,6 +166,11 @@ internal fun selectElementWithLasso(
 }
 
 internal fun ElementEntity.transform() = ElementTransform(x, y, width, height, rotation)
+
+internal fun ElementEntity.minimumTransformSize(): Float = when (kind) {
+    ElementKind.HIGHLIGHT.name, ElementKind.UNDERLINE.name, ElementKind.STRIKEOUT.name -> minOf(1f, width, height)
+    else -> 24f
+}
 
 private fun rotatedExtents(width: Float, height: Float, rotation: Float): Pair<Float, Float> {
     val radians = Math.toRadians(rotation.toDouble())

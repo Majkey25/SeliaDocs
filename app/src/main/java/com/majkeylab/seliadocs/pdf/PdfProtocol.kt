@@ -4,9 +4,9 @@ import kotlin.math.roundToInt
 
 internal data class PdfRenderSize(val width: Int, val height: Int)
 
-internal fun fitPdfRenderSize(width: Int, height: Int): PdfRenderSize {
-    require(width > 0 && height > 0)
-    val scale = minOf(1.0, PdfProtocol.MAX_RENDER_DIMENSION.toDouble() / maxOf(width, height))
+internal fun fitPdfRenderSize(width: Int, height: Int, maxDimension: Int = PdfProtocol.MAX_RENDER_DIMENSION): PdfRenderSize {
+    require(width > 0 && height > 0 && maxDimension in 1..PdfProtocol.MAX_RENDER_DIMENSION)
+    val scale = minOf(1.0, maxDimension.toDouble() / maxOf(width, height))
     return PdfRenderSize(
         (width * scale).roundToInt().coerceAtLeast(1),
         (height * scale).roundToInt().coerceAtLeast(1),

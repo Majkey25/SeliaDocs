@@ -87,6 +87,40 @@ class ElementTransformTest {
     }
 
     @Test
+    fun movingSmallPdfMarkupPreservesGlyphDimensions() {
+        listOf("HIGHLIGHT", "UNDERLINE", "STRIKEOUT").forEach { kind ->
+            val mark = element.copy(kind = kind, width = 10f, height = 0.5f)
+            val moved = mark.transform().copy(x = 70f, y = 80f)
+            assertEquals(0.5f, mark.minimumTransformSize(), 0f)
+            assertEquals(moved, clampElementTransform(moved, 595f, 842f, mark.minimumTransformSize()))
+        }
+        assertEquals(24f, element.minimumTransformSize(), 0f)
+    }
+
+    @Test
+    fun smallPageAndRotatedMinimumSizeFitWithoutThrowing() {
+        listOf(0f, 45f, 90f, 135f).forEach { rotation ->
+            val result = requireNotNull(clampElementTransform(ElementTransform(0f, 0f, 24f, 24f, rotation), 10f, 12f))
+            val radians = Math.toRadians(rotation.toDouble())
+            val extentX = result.width / 2 * kotlin.math.abs(kotlin.math.cos(radians)) + result.height / 2 * kotlin.math.abs(kotlin.math.sin(radians))
+            val extentY = result.width / 2 * kotlin.math.abs(kotlin.math.sin(radians)) + result.height / 2 * kotlin.math.abs(kotlin.math.cos(radians))
+            assertTrue(result.x + result.width / 2 - extentX >= -0.001)
+            assertTrue(result.x + result.width / 2 + extentX <= 10.001)
+            assertTrue(result.y + result.height / 2 - extentY >= -0.001)
+            assertTrue(result.y + result.height / 2 + extentY <= 12.001)
+        }
+    }
+
+    @Test
+    fun invalidPageDimensionsAndMinimumSizeReturnNull() {
+        listOf(0f, -1f, Float.NaN, Float.POSITIVE_INFINITY).forEach { value ->
+            assertNull(clampElementTransform(element.transform(), value, 842f))
+            assertNull(clampElementTransform(element.transform(), 595f, value))
+            assertNull(clampElementTransform(element.transform(), 595f, 842f, value))
+        }
+    }
+
+    @Test
     fun lassoSelectsTopmostElementWhoseCenterIsInside() {
         val top = element.copy(id = "top", zIndex = 3)
         val lasso =

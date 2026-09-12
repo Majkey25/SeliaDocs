@@ -67,6 +67,8 @@ internal class BackupExporter(
                     content.elements.forEach { element ->
                         BackupJson.writeRecord(writer, element.toBackup())
                         element.assetId?.let(written.assetIds::add)
+                        if (element.annotationRects != null) written.annotationFeatures += "pdf-markup"
+                        if (element.sourcePageId != null) written.annotationFeatures += "source-links"
                     }
                     content.blocks.forEach { BackupJson.writeRecord(writer, it.toBackup()) }
                     written.pages += content.pages.size
@@ -85,7 +87,7 @@ internal class BackupExporter(
                 notebookCount = plan.notebookIds.size,
                 pageCount = plan.pageCount,
                 assetCount = plan.assetFiles.size,
-                featureFlags = featureFlags(plan),
+                featureFlags = featureFlags(plan) + written.annotationFeatures,
             )
         checksums[MANIFEST_ENTRY] =
             zip.writeHashedEntry(MANIFEST_ENTRY) { entry ->
@@ -285,6 +287,10 @@ internal class BackupExporter(
             expression = expression,
             resultText = resultText,
             ocrRegions = ocrRegions,
+            colorArgb = colorArgb,
+            annotationRects = annotationRects,
+            sourcePageId = sourcePageId,
+            sourceRect = sourceRect,
         )
 
     private fun BlockEntity.toBackup() =
@@ -302,6 +308,7 @@ internal class BackupExporter(
     private class WrittenCounts {
         var pages = 0
         val assetIds = linkedSetOf<String>()
+        val annotationFeatures = linkedSetOf<String>()
     }
 
     private class CountingOutputStream(private val output: OutputStream) : OutputStream() {

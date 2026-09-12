@@ -16,6 +16,7 @@ import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -882,6 +883,97 @@ class PageViewportFlowTest {
         assertEquals(0, commits.get())
     }
 
+    @Test
+    fun fingerTapSelectsAtFitWhileSwipeTurnsPageAndStylusStillLassos() {
+        assertFingerSelectionAndNavigation(zoomFirst = false)
+    }
+
+    @Test
+    fun fingerTapSelectsAfterRealPinchAndPanWhileStylusStillLassos() {
+        assertFingerSelectionAndNavigation(zoomFirst = true)
+    }
+
+    private fun assertFingerSelectionAndNavigation(zoomFirst: Boolean) {
+        val target = element().copy(x = 262.5f, y = 401f, width = 70f, height = 40f)
+        var selectedId by mutableStateOf<String?>(null)
+        val selections = AtomicReference<List<CanvasPoint>>(emptyList())
+        val selectionCalls = AtomicInteger()
+        val finished = AtomicInteger()
+        val nextPages = AtomicInteger()
+        val transforms = AtomicInteger()
+        renderSelectedElement(
+            target,
+            selectedElementId = { selectedId },
+            pageCount = 2,
+            onNextPage = { nextPages.incrementAndGet() },
+            onStrokeFinished = { finished.incrementAndGet() },
+            onSelectContent = { points ->
+                selections.set(points)
+                selectionCalls.incrementAndGet()
+                selectedId = selectElementWithLasso(points, listOf(target))
+            },
+            onCommit = { transforms.incrementAndGet() },
+        )
+        waitForNativeInputReady()
+        if (zoomFirst) pinchToMaximumZoom()
+        else assertEquals("Zoom 100%", zoomDescription(compose.onNodeWithTag("page-viewport")))
+
+        fun tapTarget() {
+            compose.onNodeWithTag("element-${target.id}").assertIsDisplayed().performClick()
+            compose.waitUntil(5_000) { selectedId == target.id }
+            compose.onNodeWithTag("element-selection").assertIsDisplayed()
+            val point = selections.get().single()
+            assertEquals(target.x + target.width / 2f, point.x, 3f)
+            assertEquals(target.y + target.height / 2f, point.y, 3f)
+        }
+        fun deselectByBlankTap() {
+            val bounds = compose.onNodeWithTag("element-${target.id}").fetchSemanticsNode().boundsInRoot
+            val blank = rootPoint(bounds.topLeft - Offset(80f, 80f))
+            dispatchFingerGesture(blank, blank)
+            compose.waitUntil(5_000) { selectedId == null }
+        }
+
+        tapTarget()
+        deselectByBlankTap()
+        val callsBeforeSwipe = selectionCalls.get()
+        if (zoomFirst) {
+            val before = visiblePaperPoint(0.5f, 0.5f)
+            val bounds = compose.onNodeWithTag("element-${target.id}").fetchSemanticsNode().boundsInRoot
+            val start = rootPoint(bounds.topLeft - Offset(80f, 80f))
+            dispatchFingerGesture(start, start + Offset(0f, 80f))
+            compose.waitUntil(5_000) { visiblePaperPoint(0.5f, 0.5f).y > before.y + 10f }
+            assertEquals("Panning must not turn a page", 0, nextPages.get())
+        } else {
+            dispatchFingerGesture(visiblePaperPoint(0.8f, 0.15f), visiblePaperPoint(0.2f, 0.15f))
+            compose.waitUntil(5_000) { nextPages.get() == 1 }
+        }
+        compose.waitForIdle()
+        assertEquals("A finger swipe must not become a selection", callsBeforeSwipe, selectionCalls.get())
+        assertEquals("Navigation must not draw ink", 0, finished.get())
+        assertEquals("Navigation must not move the element", 0, transforms.get())
+
+        tapTarget()
+        deselectByBlankTap()
+        val bounds = compose.onNodeWithTag("element-${target.id}").fetchSemanticsNode().boundsInRoot
+        val topLeft = rootPoint(bounds.topLeft - Offset(15f, 15f))
+        val bottomRight = rootPoint(bounds.bottomRight + Offset(15f, 15f))
+        val corners = listOf(topLeft, Offset(bottomRight.x, topLeft.y), bottomRight,
+            Offset(topLeft.x, bottomRight.y), topLeft)
+        val time = android.os.SystemClock.uptimeMillis()
+        dispatchEvents(
+            *corners.mapIndexed { index, point ->
+                stylusEvent(time, time + index * 16L,
+                    if (index == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE, point.x, point.y)
+            }.toTypedArray(),
+            stylusEvent(time, time + 80, MotionEvent.ACTION_UP, topLeft.x, topLeft.y),
+        )
+        compose.waitUntil(5_000) { selectedId == target.id }
+        compose.onNodeWithTag("element-selection").assertIsDisplayed()
+        assertTrue("Stylus must produce a lasso, not a finger tap", selections.get().size >= 4)
+        assertEquals("Lasso must not draw ink", 0, finished.get())
+        assertEquals("Lasso must not move the element", 0, transforms.get())
+    }
+
     private fun zoomDescription(viewport: androidx.compose.ui.test.SemanticsNodeInteraction): String =
         viewport.fetchSemanticsNode().config[SemanticsProperties.StateDescription]
 
@@ -965,6 +1057,8 @@ class PageViewportFlowTest {
         tool: () -> EditorTool = { EditorTool.LASSO },
         selectedElementId: () -> String? = { element.id },
         initialViewport: PageViewport = PageViewport(),
+        pageCount: Int = 1,
+        onNextPage: () -> Unit = {},
         onStrokeFinished: (Stroke) -> Unit = {},
         onEraseFinished: (List<CanvasPoint>) -> Unit = {},
         onSelectContent: (List<CanvasPoint>) -> Unit = {},
@@ -974,7 +1068,7 @@ class PageViewportFlowTest {
             PageCanvas(
                 page = PageEntity("page", "notebook", 0, PaperTemplate.RULED.name, 595, 842),
                 pageNumber = 1,
-                pageCount = 1,
+                pageCount = pageCount,
                 strokes = emptyList(),
                 elements = listOf(element),
                 blocks = emptyList(),
@@ -986,7 +1080,7 @@ class PageViewportFlowTest {
                 highlighterWidth = 16f,
                 pageTransitionEnabled = false,
                 onPreviousPage = {},
-                onNextPage = {},
+                onNextPage = onNextPage,
                 onStrokeFinished = { _, stroke -> onStrokeFinished(stroke) },
                 onEraseFinished = { _, points -> onEraseFinished(points) },
                 onSelectContent = { _, points -> onSelectContent(points) },

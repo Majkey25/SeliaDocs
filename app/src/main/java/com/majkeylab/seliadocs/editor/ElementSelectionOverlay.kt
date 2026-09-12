@@ -82,6 +82,7 @@ internal fun ElementSelectionOverlay(
                 proposed,
                 page.widthPoints.toFloat(),
                 page.heightPoints.toFloat(),
+                minimumSize = element.minimumTransformSize(),
             ) ?: return false
         if (clamped == current) return false
         current = clamped
@@ -161,6 +162,7 @@ internal fun ElementSelectionOverlay(
                                     y = current.y + pointerDeltaToPage(amount.y, density.density, scaleY),
                                 ),
                                 page,
+                                element.minimumTransformSize(),
                                 onPreview,
                             ) { current = it }
                         }
@@ -218,6 +220,7 @@ internal fun ElementSelectionOverlay(
                                     height = current.height + pointerDeltaToPage(amount.y, density.density, scaleY),
                                 ),
                                 page,
+                                element.minimumTransformSize(),
                                 onPreview,
                             ) { current = it }
                         }
@@ -276,6 +279,7 @@ internal fun ElementSelectionOverlay(
                                     proposed,
                                     page.widthPoints.toFloat(),
                                     page.heightPoints.toFloat(),
+                                    minimumSize = element.minimumTransformSize(),
                                 ) ?: return@detectDragGestures
                             current = clamped
                             onPreview(clamped)
@@ -322,6 +326,7 @@ private fun Handle(contentDescription: String, modifier: Modifier) {
 private inline fun update(
     proposed: ElementTransform,
     page: PageEntity,
+    minimumSize: Float,
     onPreview: (ElementTransform) -> Unit,
     apply: (ElementTransform) -> Unit,
 ) {
@@ -330,6 +335,7 @@ private inline fun update(
             proposed,
             page.widthPoints.toFloat(),
             page.heightPoints.toFloat(),
+            minimumSize = minimumSize,
         ) ?: return
     apply(clamped)
     onPreview(clamped)

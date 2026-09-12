@@ -1,6 +1,7 @@
 package com.majkeylab.seliadocs.editor
 
 import android.graphics.BitmapFactory
+import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
@@ -17,6 +18,7 @@ import com.majkeylab.seliadocs.data.AssetStore
 import com.majkeylab.seliadocs.data.BlockEntity
 import com.majkeylab.seliadocs.data.ElementEntity
 import com.majkeylab.seliadocs.data.ElementKind
+import com.majkeylab.seliadocs.data.decodeAnnotationRects
 import com.majkeylab.seliadocs.data.LibraryMutationGate
 import com.majkeylab.seliadocs.data.NotebookContent
 import com.majkeylab.seliadocs.data.PageEntity
@@ -39,14 +41,15 @@ import kotlinx.coroutines.ensureActive
 private const val MAX_IMAGE_DECODE_DIMENSION = 4_096
 private const val MAX_IMAGE_DECODE_PIXELS = 16L * 1_024 * 1_024
 
-internal fun imageSampleSize(width: Int, height: Int, targetWidth: Int, targetHeight: Int): Int {
-    require(width > 0 && height > 0 && targetWidth > 0 && targetHeight > 0)
+internal fun imageSampleSize(width: Int, height: Int, targetWidth: Int, targetHeight: Int, maxPixels: Long = MAX_IMAGE_DECODE_PIXELS): Int {
+    require(width > 0 && height > 0 && targetWidth > 0 && targetHeight > 0 && maxPixels > 0)
     var sample = 1
     while (width / sample / 2 >= targetWidth && height / sample / 2 >= targetHeight) sample *= 2
     while (
         ((width.toLong() + sample - 1) / sample) * ((height.toLong() + sample - 1) / sample) >
-            MAX_IMAGE_DECODE_PIXELS
+            maxPixels
     ) {
+        require(sample <= Int.MAX_VALUE / 2) { "Image dimensions exceed decode budget" }
         sample *= 2
     }
     return sample
@@ -107,7 +110,7 @@ internal suspend fun writePdfToDestination(
     }
 }
 
-internal class PdfExporter(private val assets: AssetStore) {
+internal class PdfExporter(private val assets: AssetStore, private val maxImageDecodePixels: Long = MAX_IMAGE_DECODE_PIXELS) {
     suspend fun write(
         content: NotebookContent,
         output: OutputStream,
@@ -171,7 +174,7 @@ internal class PdfExporter(private val assets: AssetStore) {
         }
     }
 
-    private fun renderPage(
+    internal fun renderPage(
         canvas: Canvas,
         page: PageEntity,
         strokes: List<com.majkeylab.seliadocs.data.StrokeEntity>,
@@ -262,6 +265,22 @@ internal class PdfExporter(private val assets: AssetStore) {
             ElementKind.MATH -> drawText(canvas, element.resultText.orEmpty(), element, 8f)
             ElementKind.IMAGE -> drawImage(canvas, element)
             ElementKind.SHAPE -> drawShape(canvas, element)
+            ElementKind.HIGHLIGHT, ElementKind.UNDERLINE, ElementKind.STRIKEOUT -> {
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = element.colorArgb ?: 0x66FFD54F }
+                if (kind == ElementKind.HIGHLIGHT) paint.blendMode = BlendMode.MULTIPLY
+                decodeAnnotationRects(element.annotationRects).forEach { rect ->
+                    val left = element.x + rect.left * element.width
+                    val top = element.y + rect.top * element.height
+                    val right = element.x + rect.right * element.width
+                    val bottom = element.y + rect.bottom * element.height
+                    if (kind == ElementKind.HIGHLIGHT) canvas.drawRect(left, top, right, bottom, paint)
+                    else {
+                        paint.strokeWidth = ((bottom - top) * 0.08f).coerceAtLeast(1f)
+                        val y = if (kind == ElementKind.UNDERLINE) bottom else (top + bottom) / 2f
+                        canvas.drawLine(left, y, right, y, paint)
+                    }
+                }
+            }
         }
         canvas.restoreToCount(saved)
     }
@@ -292,13 +311,11 @@ internal class PdfExporter(private val assets: AssetStore) {
         val targetWidth =
             minOf(
                 ceil(element.width).toInt().coerceAtLeast(1),
-                canvas.width.coerceAtLeast(1),
                 MAX_IMAGE_DECODE_DIMENSION,
             )
         val targetHeight =
             minOf(
                 ceil(element.height).toInt().coerceAtLeast(1),
-                canvas.height.coerceAtLeast(1),
                 MAX_IMAGE_DECODE_DIMENSION,
             )
         val sample =
@@ -307,6 +324,7 @@ internal class PdfExporter(private val assets: AssetStore) {
                 bounds.outHeight,
                 targetWidth,
                 targetHeight,
+                maxPixels = maxImageDecodePixels,
             )
         val bitmap = decodeOrientedImage(file, sample)
         try {

@@ -8,6 +8,8 @@ import com.majkeylab.seliadocs.data.BlockKind
 import com.majkeylab.seliadocs.data.CoverColor
 import com.majkeylab.seliadocs.data.CoverPattern
 import com.majkeylab.seliadocs.data.ElementKind
+import com.majkeylab.seliadocs.data.MAX_ANNOTATION_DATA_LENGTH
+import com.majkeylab.seliadocs.data.validateAnnotationFields
 import com.majkeylab.seliadocs.data.PageMode
 import com.majkeylab.seliadocs.data.PageOrientation
 import com.majkeylab.seliadocs.data.PaperTemplate
@@ -43,6 +45,8 @@ internal object BackupJson {
             "kind",
             "id",
             "pageId",
+            "sourcePageId",
+            "sourceRect",
             "notebookId",
             "chapterId",
             "pdfSourceId",
@@ -355,6 +359,7 @@ internal object BackupJson {
         when {
             kind == "stroke" && field == "inputs" -> MAX_STROKE_BASE64_CHARS
             kind == "element" && field == "ocrRegions" -> MAX_OCR_REGION_DATA_LENGTH
+            kind == "element" && field == "annotationRects" -> MAX_ANNOTATION_DATA_LENGTH
             kind == "notebook" && field == "title" -> MAX_TEXT_CHARS
             kind == "page" && field == "title" -> MAX_TEXT_CHARS
             kind == "chapter" && field == "title" -> MAX_TEXT_CHARS
@@ -450,6 +455,10 @@ internal object BackupJson {
         writeNullableString("expression", record.expression)
         writeNullableString("resultText", record.resultText)
         writeNullableString("ocrRegions", record.ocrRegions)
+        name("colorArgb").value(record.colorArgb?.toLong())
+        writeNullableString("annotationRects", record.annotationRects)
+        writeNullableString("sourcePageId", record.sourcePageId)
+        writeNullableString("sourceRect", record.sourceRect)
     }
 
     private fun JsonWriter.writeBlock(record: BackupBlock) {
@@ -697,6 +706,10 @@ internal object BackupJson {
         var expression: String? = null
         var resultText: String? = null
         var ocrRegions: String? = null
+        var colorArgb: Int? = null
+        var annotationRects: String? = null
+        var sourcePageId: String? = null
+        var sourceRect: String? = null
         beginObject()
         while (hasNext()) {
             when (nextName()) {
@@ -719,6 +732,10 @@ internal object BackupJson {
                 "resultText" -> resultText = nextNullableString("resultText", MAX_TEXT_CHARS)
                 "ocrRegions" ->
                     ocrRegions = nextNullableString("ocrRegions", MAX_OCR_REGION_DATA_LENGTH)
+                "colorArgb" -> colorArgb = nextNullableInt("colorArgb")
+                "annotationRects" -> annotationRects = nextNullableString("annotationRects", MAX_ANNOTATION_DATA_LENGTH)
+                "sourcePageId" -> sourcePageId = nextNullableString("sourcePageId", MAX_SHORT_TEXT_CHARS)
+                "sourceRect" -> sourceRect = nextNullableString("sourceRect", MAX_SHORT_TEXT_CHARS)
                 else -> skipValue()
             }
         }
@@ -739,6 +756,10 @@ internal object BackupJson {
             expression = expression,
             resultText = resultText,
             ocrRegions = ocrRegions,
+            colorArgb = colorArgb,
+            annotationRects = annotationRects,
+            sourcePageId = sourcePageId,
+            sourceRect = sourceRect,
         ).also(::validate)
     }
 
@@ -982,7 +1003,13 @@ internal object BackupJson {
                     requireSize(it, "ocrRegions", MAX_OCR_REGION_DATA_LENGTH)
                     if (decodeImageOcrRegions(it).isEmpty()) throw BackupFailure.Malformed()
                 }
-                when (enumValue<ElementKind>(record.kind)) {
+                val elementKind = enumValue<ElementKind>(record.kind)
+                try {
+                    validateAnnotationFields(elementKind, record.colorArgb, record.annotationRects, record.sourcePageId, record.sourceRect)
+                } catch (failure: IllegalArgumentException) {
+                    throw BackupFailure.Malformed(failure)
+                }
+                when (elementKind) {
                     ElementKind.TEXT -> {
                         if (
                             record.text == null ||
@@ -1026,6 +1053,12 @@ internal object BackupJson {
                         ) throw BackupFailure.Malformed()
                         requireText(record.expression, "expression", MAX_TEXT_CHARS)
                         requireText(record.resultText, "resultText", MAX_TEXT_CHARS)
+                    }
+                    ElementKind.HIGHLIGHT, ElementKind.UNDERLINE, ElementKind.STRIKEOUT -> {
+                        if (record.assetId != null || record.shapeKind != null || record.expression != null ||
+                            record.resultText != null || record.ocrRegions != null
+                        ) throw BackupFailure.Malformed()
+                        requireText(record.text ?: throw BackupFailure.Malformed(), "text", MAX_ELEMENT_TEXT_CHARS)
                     }
                 }
             }

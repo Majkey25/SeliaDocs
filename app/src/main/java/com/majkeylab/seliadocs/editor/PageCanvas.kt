@@ -107,6 +107,8 @@ import com.majkeylab.seliadocs.data.StrokeEntity
 import com.majkeylab.seliadocs.data.TEXT_ELEMENT_MAX_LENGTH
 import com.majkeylab.seliadocs.data.pageTextFits
 import com.majkeylab.seliadocs.recognition.ImageOcrRegion
+import com.majkeylab.seliadocs.pdf.PdfTextSelection
+import com.majkeylab.seliadocs.data.AnnotationRect
 import com.majkeylab.seliadocs.recognition.matchingImageOcrRegions
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -169,6 +171,8 @@ internal fun PageCanvas(
     initialViewport: PageViewport = PageViewport(),
     onCommitInkTransform: (InkSelectionTransform) -> Unit = {},
     inkCanvases: MutableSet<InkCanvasView>? = null,
+    pdfSelection: PdfTextSelection? = null,
+    pdfRegion: AnnotationRect? = null,
     modifier: Modifier = Modifier,
 ) {
     val frame = CanvasPageFrame(page, pageNumber, strokes, elements, blocks, ocrSearchHighlight)
@@ -227,6 +231,8 @@ internal fun PageCanvas(
                     initialViewport,
                     onCommitInkTransform,
                     inkCanvases,
+                    pdfSelection,
+                    pdfRegion,
                 )
             }
         }
@@ -285,6 +291,8 @@ private fun Paper(
     initialViewport: PageViewport,
     onCommitInkTransform: (InkSelectionTransform) -> Unit,
     inkCanvases: MutableSet<InkCanvasView>?,
+    pdfSelection: PdfTextSelection?,
+    pdfRegion: AnnotationRect?,
 ) {
     val ratio = page.widthPoints.toFloat() / page.heightPoints
     var inkPreview by
@@ -608,6 +616,9 @@ private fun Paper(
                     initialDraft = initialPageTextDraft,
                     inputEnabled = pageTextInputEnabled,
                 )
+                if ((pdfSelection != null || pdfRegion != null) && isCurrentPage()) {
+                    PdfSelectionPreview(pdfSelection, pdfRegion, Modifier.fillMaxSize())
+                }
                 ElementLayer(
                     page,
                     elements,
@@ -1127,6 +1138,7 @@ private fun ElementLayer(
                         StoredImage(assetFile(id), modifier, highlightedRegions, element.id)
                     }
                     ElementKind.SHAPE -> CleanShape(element, modifier)
+                    ElementKind.HIGHLIGHT, ElementKind.UNDERLINE, ElementKind.STRIKEOUT -> PdfMarkupElement(element, modifier)
                     null -> Unit
                 }
             }

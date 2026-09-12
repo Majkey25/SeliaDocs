@@ -11,6 +11,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.majkeylab.seliadocs.R
 import com.majkeylab.seliadocs.data.AssetStore
+import com.majkeylab.seliadocs.data.AnnotationRect
+import com.majkeylab.seliadocs.data.encodeSourceRect
 import com.majkeylab.seliadocs.data.BlockEntity
 import com.majkeylab.seliadocs.data.ChapterEntity
 import com.majkeylab.seliadocs.data.ElementDraft
@@ -27,6 +29,8 @@ import com.majkeylab.seliadocs.data.StrokeEntity
 import com.majkeylab.seliadocs.data.StrokePayload
 import com.majkeylab.seliadocs.pdf.PdfImporter
 import com.majkeylab.seliadocs.pdf.PdfSandboxClient
+import com.majkeylab.seliadocs.pdf.PdfTextSelection
+import com.majkeylab.seliadocs.pdf.PdfTextSelector
 import com.majkeylab.seliadocs.recognition.ImageOcrResult
 import com.majkeylab.seliadocs.recognition.InkMathCandidate
 import com.majkeylab.seliadocs.recognition.InkMathDecision
@@ -85,6 +89,10 @@ internal data class EditorUiState(
     val recognitionMessage: String? = null,
     val ambiguousMathCandidates: List<InkMathCandidate> = emptyList(),
     val handwritingCandidates: List<String> = emptyList(),
+    val pdfSelection: PdfTextSelection? = null,
+    val pdfRegion: AnnotationRect? = null,
+    val pdfSelecting: Boolean = false,
+    val pdfSelectionMessage: String? = null,
 ) {
     val selectedPage: PageEntity?
         get() = pages.firstOrNull { it.id == selectedPageId } ?: pages.firstOrNull()
@@ -149,7 +157,8 @@ internal fun estimatePageSnapshotWeight(
                 element.shapeKind.estimatedBytes() +
                 element.expression.estimatedBytes() +
                 element.resultText.estimatedBytes() +
-                element.ocrRegions.estimatedBytes()
+                element.ocrRegions.estimatedBytes() + element.annotationRects.estimatedBytes() +
+                element.sourcePageId.estimatedBytes() + element.sourceRect.estimatedBytes()
         }
     val blockBytes =
         blocks.sumOf { block ->
@@ -196,6 +205,10 @@ private data class EditorControls(
     val recognitionMessage: String? = null,
     val ambiguousMathCandidates: List<InkMathCandidate> = emptyList(),
     val handwritingCandidates: List<String> = emptyList(),
+    val pdfSelection: PdfTextSelection? = null,
+    val pdfSelecting: Boolean = false,
+    val pdfSelectionMessage: String? = null,
+    val pdfRegion: AnnotationRect? = null,
 )
 
 private data class RecognitionSource(
@@ -281,6 +294,9 @@ internal class EditorViewModel(
     private val assets = AssetStore(File(application.filesDir, "assets"))
     private val imageImporter = ImageImporter(application.contentResolver, assets)
     private val pdfSandbox = PdfSandboxClient(application)
+    private val pdfTextSelector = PdfTextSelector(application)
+    private var pdfSelectionJob: Job? = null
+    private var pdfSelectionEpoch = 0L
     private val pdfImporter = PdfImporter(application.contentResolver, assets, repository, pdfSandbox)
     private val selectedPageId = MutableStateFlow<String?>(null)
     private val controls = MutableStateFlow(EditorControls(tool = initialTool))
@@ -376,11 +392,16 @@ internal class EditorViewModel(
                     recognitionMessage = editorControls.recognitionMessage,
                     ambiguousMathCandidates = editorControls.ambiguousMathCandidates,
                     handwritingCandidates = editorControls.handwritingCandidates,
+                    pdfSelection = editorControls.pdfSelection,
+                    pdfRegion = editorControls.pdfRegion,
+                    pdfSelecting = editorControls.pdfSelecting,
+                    pdfSelectionMessage = editorControls.pdfSelectionMessage,
                 )
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EditorUiState())
 
     fun selectPage(id: String) {
+        dismissPdfSelection()
         controls.value = controls.value.copy(ocrSearchHighlight = null)
         if (state.value.selectedPage?.id == id) return
         clearRecognition()
@@ -403,6 +424,7 @@ internal class EditorViewModel(
     }
 
     fun selectTool(tool: EditorTool) {
+        if (controls.value.tool != tool) dismissPdfSelection()
         if (controls.value.tool != tool) clearRecognition()
         controls.value =
             controls.value.copy(
@@ -480,6 +502,7 @@ internal class EditorViewModel(
         recognitionLanguage: RecognitionLanguage = RecognitionLanguage.CZECH,
         onComplete: (Boolean) -> Unit = {},
     ) {
+        dismissPdfSelection()
         val encoded = InkCodec.encode(stroke)
         val toolAtFinish =
             when (encoded.brushKind) {
@@ -611,6 +634,7 @@ internal class EditorViewModel(
     }
 
     fun selectStrokes(pageId: String, lasso: List<CanvasPoint>) {
+        dismissPdfSelection()
         val strokes = state.value.strokes.filter { it.pageId == pageId }.map(StrokeEntity::toStrokePath)
         controls.value =
             controls.value.copy(
@@ -619,7 +643,8 @@ internal class EditorViewModel(
             )
     }
 
-    fun selectContent(pageId: String, lasso: List<CanvasPoint>) {
+    fun selectContent(pageId: String, lasso: List<CanvasPoint>, allowOcr: Boolean = true) {
+        dismissPdfSelection()
         val elementId =
             selectElementWithLasso(
                 lasso,
@@ -629,10 +654,167 @@ internal class EditorViewModel(
             selectElement(elementId)
         } else {
             selectStrokes(pageId, lasso)
+            if (controls.value.selectedStrokeIds.isEmpty()) selectPdfText(pageId, lasso, allowOcr)
+        }
+        val page = state.value.selectedPage?.takeIf { it.id == pageId && it.pdfSourceId != null }
+        if (page != null && lasso.isNotEmpty() && lasso.all { it.x.isFinite() && it.y.isFinite() }) {
+            val left = (lasso.minOf { it.x } / page.widthPoints).coerceIn(0f, 1f)
+            val top = (lasso.minOf { it.y } / page.heightPoints).coerceIn(0f, 1f)
+            val right = (lasso.maxOf { it.x } / page.widthPoints).coerceIn(0f, 1f)
+            val bottom = (lasso.maxOf { it.y } / page.heightPoints).coerceIn(0f, 1f)
+            if (left < right && top < bottom) controls.value = controls.value.copy(pdfRegion = AnnotationRect(left, top, right, bottom))
+        }
+    }
+
+    fun dismissPdfSelection() {
+        pdfSelectionEpoch++
+        pdfSelectionJob?.cancel()
+        pdfSelectionJob = null
+        controls.value = controls.value.copy(pdfSelection = null, pdfRegion = null, pdfSelecting = false, pdfSelectionMessage = null)
+    }
+
+    private fun selectPdfText(pageId: String, points: List<CanvasPoint>, allowOcr: Boolean) {
+        val page = state.value.selectedPage?.takeIf { it.id == pageId && it.pdfSourceId != null } ?: return
+        val pageIndex = page.pdfPageIndex ?: return
+        if (points.isEmpty() || points.any { !it.x.isFinite() || !it.y.isFinite() }) return
+        val left = (points.minOf { it.x } / page.widthPoints).coerceIn(0f, 1f)
+        val top = (points.minOf { it.y } / page.heightPoints).coerceIn(0f, 1f)
+        val right = (points.maxOf { it.x } / page.widthPoints).coerceIn(0f, 1f)
+        val bottom = (points.maxOf { it.y } / page.heightPoints).coerceIn(0f, 1f)
+        val epoch = pdfSelectionEpoch
+        controls.value = controls.value.copy(
+            pdfSelecting = true,
+            pdfRegion = if (left < right && top < bottom) AnnotationRect(left, top, right, bottom) else null,
+        )
+        pdfSelectionJob = viewModelScope.launch {
+            try {
+                val source = repository.getPdfSource(requireNotNull(page.pdfSourceId))
+                val selection = pdfTextSelector.select(assets.requireFile(source.assetId), pageIndex, left, top, right, bottom, allowOcr)
+                currentCoroutineContext().ensureActive()
+                if (epoch == pdfSelectionEpoch && state.value.selectedPage?.id == pageId) {
+                    controls.value = controls.value.copy(
+                        pdfSelection = selection, pdfSelecting = false,
+                        pdfSelectionMessage = if (selection == null) getApplication<Application>().getString(
+                            if (allowOcr) R.string.pdf_no_text else R.string.pdf_ocr_disabled,
+                        ) else null,
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                if (epoch == pdfSelectionEpoch) controls.value = controls.value.copy(
+                    pdfSelecting = false,
+                    pdfSelectionMessage = getApplication<Application>().getString(
+                        if (failure is UnsupportedOperationException) R.string.pdf_ocr_disabled else R.string.pdf_text_failed,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun markSelectedPdfText(kind: ElementKind, color: Int) {
+        val selection = controls.value.pdfSelection ?: return
+        val page = state.value.selectedPage ?: return
+        val epoch = pdfSelectionEpoch
+        val draft = pdfMarkupDraft(page, selection, kind, color)
+        mutate {
+            if (epoch != pdfSelectionEpoch || state.value.selectedPage?.id != page.id) return@mutate
+            val history = history(page.id)
+            val id = repository.addElement(page.id, draft)
+            history.push(snapshot(page.id))
+            dismissPdfSelection()
+            controls.value = controls.value.copy(selectedElementId = id, selectedStrokeIds = emptySet())
+            updateHistoryControls(history)
+        }
+    }
+
+    val excerptNotebooks = repository.observeNotebooks()
+
+    suspend fun excerptPages(notebookId: String): List<PageEntity> = repository.getPages(notebookId)
+
+    fun copyPdfSelectionTo(targetPageId: String, asImage: Boolean = false, onComplete: (Boolean) -> Unit) {
+        val selection = controls.value.pdfSelection
+        val region = if (asImage) controls.value.pdfRegion else selection?.let {
+            AnnotationRect(it.bounds.minOf { b -> b.left }, it.bounds.minOf { b -> b.top },
+                it.bounds.maxOf { b -> b.right }, it.bounds.maxOf { b -> b.bottom })
+        }
+        if (region == null || (!asImage && selection == null)) return onComplete(false)
+        val source = state.value.selectedPage ?: return onComplete(false)
+        val epoch = pdfSelectionEpoch
+        mutate(onComplete = onComplete) {
+            check(epoch == pdfSelectionEpoch && state.value.selectedPage?.id == source.id)
+            val target = requireNotNull(repository.getPage(targetPageId))
+            val history = history(target.id)
+            withContext(NonCancellable) {
+                var asset: ImportedAsset? = null
+                var inserted = false
+                try {
+                    asset = if (asImage) capturePageExcerpt(
+                        getApplication(), assets, source,
+                        source.pdfSourceId?.let { repository.getPdfSource(it) },
+                        repository.getStrokes(source.id), repository.getElements(source.id), repository.getBlocks(source.id), region,
+                    ) else null
+                    val transform = if (asset != null) {
+                        val scale = minOf(target.widthPoints * 0.7f / asset.width, target.heightPoints * 0.7f / asset.height)
+                        val width = asset.width * scale
+                        val height = asset.height * scale
+                        ElementTransform((target.widthPoints - width) / 2f, (target.heightPoints - height) / 2f, width, height, 0f)
+                    } else requireNotNull(initialTextElementTransform(
+                        target.widthPoints.toFloat(), target.heightPoints.toFloat(),
+                        CanvasPoint(target.widthPoints * 0.1f, target.heightPoints * 0.1f), requireNotNull(selection).text,
+                    )) { "Selected text does not fit on the destination page" }
+                    repository.addLinkedExcerpt(target.id, ElementDraft(
+                        kind = if (asImage) ElementKind.IMAGE else ElementKind.TEXT,
+                        text = selection?.text, assetId = asset?.id,
+                        x = transform.x, y = transform.y, width = transform.width, height = transform.height,
+                        sourcePageId = source.id, sourceRect = encodeSourceRect(region),
+                    ))
+                    inserted = true
+                } finally {
+                    if (!inserted) asset?.let { check(it.file.delete() || !it.file.exists()) { "Excerpt asset cleanup failed" } }
+                }
+            }
+            history.push(snapshot(target.id))
+            if (state.value.selectedPage?.id == target.id) updateHistoryControls(history)
+            dismissPdfSelection()
+            controls.value = controls.value.copy(recognitionMessage = getApplication<Application>().getString(R.string.excerpt_saved))
+        }
+    }
+
+    fun openExcerptSource(elementId: String, onOpen: (PageEntity) -> Unit, onComplete: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val sourceId = repository.getElement(elementId)?.sourcePageId
+                val page = sourceId?.let { repository.getPage(it) }
+                if (page == null || repository.getNotebook(page.notebookId).trashedAt != null) {
+                    controls.value = controls.value.copy(recognitionMessage = getApplication<Application>().getString(R.string.excerpt_source_missing))
+                } else {
+                    onOpen(page)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                controls.value = controls.value.copy(failed = true)
+            } finally {
+                onComplete()
+            }
+        }
+    }
+
+    fun recolorSelectedMarkup(color: Int) {
+        val element = state.value.selectedElement?.takeIf { isTextMarkup(it.kind) } ?: return
+        mutate {
+            val current = repository.getElement(element.id) ?: return@mutate
+            val history = history(element.pageId)
+            val alpha = (current.colorArgb ?: 0x66FFD54F) and 0xFF000000.toInt()
+            repository.updateElement(current.copy(colorArgb = alpha or (color and 0x00FFFFFF)))
+            history.push(snapshot(element.pageId))
+            updateHistoryControls(history)
         }
     }
 
     fun selectElement(id: String?) {
+        dismissPdfSelection()
         if (controls.value.selectedElementId != id && imageOcrFeedback != null) {
             imageOcrFeedback = null
             controls.value = controls.value.copy(recognitionMessage = null)
@@ -650,15 +832,17 @@ internal class EditorViewModel(
         val element = state.value.selectedElement ?: return
         val page = state.value.selectedPage ?: return
         mutate {
+            val current = repository.getElement(element.id) ?: return@mutate
             val clamped =
                 clampElementTransform(
                     transform,
                     page.widthPoints.toFloat(),
                     page.heightPoints.toFloat(),
+                    minimumSize = current.minimumTransformSize(),
                 ) ?: return@mutate
             val history = history(page.id)
             repository.updateElement(
-                element.copy(
+                current.copy(
                     x = clamped.x,
                     y = clamped.y,
                     width = clamped.width,
@@ -1556,6 +1740,7 @@ internal class EditorViewModel(
         pageHistories.existing(pageId) ?: pageHistories.history(pageId, snapshot(pageId))
 
     private fun showHistoryControls(pageId: String?) {
+        dismissPdfSelection()
         val history = pageId?.let(pageHistories::existing)
         controls.value =
             controls.value.copy(

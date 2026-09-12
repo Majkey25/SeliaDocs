@@ -2,6 +2,7 @@ package com.majkeylab.seliadocs.data
 
 import androidx.room.withTransaction
 import com.majkeylab.seliadocs.editor.clampElementTransform
+import com.majkeylab.seliadocs.editor.minimumTransformSize
 import com.majkeylab.seliadocs.editor.transform
 import com.majkeylab.seliadocs.recognition.MAX_OCR_REGION_DATA_LENGTH
 import java.util.UUID
@@ -89,6 +90,8 @@ internal class SeliaDocsRepository(
     suspend fun getAllNotebooks(): List<NotebookEntity> = notebooks.getAllNotebooks()
 
     suspend fun getPages(notebookId: String): List<PageEntity> = notebooks.getPages(notebookId)
+
+    suspend fun getPage(id: String): PageEntity? = notebooks.getPage(id)
 
     suspend fun getChapters(notebookId: String): List<ChapterEntity> = notebooks.getChapters(notebookId)
 
@@ -318,6 +321,20 @@ internal class SeliaDocsRepository(
     suspend fun addElement(pageId: String, draft: ElementDraft): String =
         addElementEntity(pageId, draft).id
 
+    suspend fun addLinkedExcerpt(targetPageId: String, draft: ElementDraft): ElementEntity {
+        require((draft.kind == ElementKind.TEXT || draft.kind == ElementKind.IMAGE) && draft.sourcePageId != null && draft.sourceRect != null)
+        require(draft.shapeKind == null && draft.expression == null && draft.resultText == null)
+        if (draft.kind == ElementKind.TEXT) require(draft.assetId == null)
+        return database.withTransaction {
+            val source = requireNotNull(notebooks.getPage(draft.sourcePageId)) { "Source page not found" }
+            val target = requireNotNull(notebooks.getPage(targetPageId)) { "Target page not found" }
+            listOf(source, target).forEach { page ->
+                require(requireNotNull(notebooks.getNotebook(page.notebookId)).trashedAt == null) { "Notebook is in trash" }
+            }
+            addElementEntity(targetPageId, draft)
+        }
+    }
+
     suspend fun addElementEntity(pageId: String, draft: ElementDraft): ElementEntity {
         validateElement(draft)
         val id = idFactory()
@@ -383,6 +400,7 @@ internal class SeliaDocsRepository(
                         source.transform().copy(x = source.x + 12f, y = source.y + 12f),
                         page.widthPoints.toFloat(),
                         page.heightPoints.toFloat(),
+                        minimumSize = source.minimumTransformSize(),
                     ),
                 )
             pageContent.insertElement(
@@ -516,7 +534,12 @@ internal class SeliaDocsRepository(
                 pageContent.insertStroke(stroke.copy(id = idFactory(), pageId = newId))
             }
             sourceElements.forEach { element ->
-                pageContent.insertElement(element.copy(id = idFactory(), pageId = newId))
+                pageContent.insertElement(
+                    element.copy(
+                        id = idFactory(), pageId = newId,
+                        sourcePageId = if (element.sourcePageId == pageId) newId else element.sourcePageId,
+                    ),
+                )
             }
             sourceBlocks.forEach { block ->
                 pageContent.insertBlock(block.copy(id = idFactory(), pageId = newId))
@@ -637,8 +660,13 @@ internal class SeliaDocsRepository(
                 )
             ElementKind.SHAPE -> require(!draft.shapeKind.isNullOrBlank())
             ElementKind.MATH -> require(!draft.expression.isNullOrBlank() && !draft.resultText.isNullOrBlank())
+            ElementKind.HIGHLIGHT, ElementKind.UNDERLINE, ElementKind.STRIKEOUT -> {
+                require(!draft.text.isNullOrBlank() && draft.text.length <= TEXT_ELEMENT_MAX_LENGTH)
+                require(draft.assetId == null && draft.shapeKind == null && draft.expression == null && draft.resultText == null)
+            }
         }
         if (draft.kind != ElementKind.IMAGE) require(draft.ocrRegions == null)
+        validateAnnotationFields(draft.kind, draft.colorArgb, draft.annotationRects, draft.sourcePageId, draft.sourceRect)
     }
 
     private fun validateElement(element: ElementEntity) {
@@ -656,6 +684,10 @@ internal class SeliaDocsRepository(
                 expression = element.expression,
                 resultText = element.resultText,
                 ocrRegions = element.ocrRegions,
+                colorArgb = element.colorArgb,
+                annotationRects = element.annotationRects,
+                sourcePageId = element.sourcePageId,
+                sourceRect = element.sourceRect,
             ),
         )
     }
@@ -682,6 +714,10 @@ internal class SeliaDocsRepository(
             expression = draft.expression,
             resultText = draft.resultText,
             ocrRegions = draft.ocrRegions,
+            colorArgb = draft.colorArgb,
+            annotationRects = draft.annotationRects,
+            sourcePageId = draft.sourcePageId,
+            sourceRect = draft.sourceRect,
         )
 
 }

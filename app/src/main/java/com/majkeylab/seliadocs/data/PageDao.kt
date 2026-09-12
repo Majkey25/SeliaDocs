@@ -63,6 +63,9 @@ internal interface PageDao {
     @Query("SELECT id FROM elements")
     suspend fun getAllElementIds(): List<String>
 
+    @Query("SELECT DISTINCT sourcePageId FROM elements WHERE sourcePageId IS NOT NULL")
+    suspend fun getAllSourcePageIds(): List<String>
+
     @Query("SELECT * FROM elements WHERE pageId = :pageId ORDER BY zIndex")
     suspend fun getElements(pageId: String): List<ElementEntity>
 
