@@ -2,7 +2,7 @@ package com.majkeylab.seliadocs.backup
 
 import java.io.IOException
 
-internal const val BACKUP_FORMAT_VERSION = 5
+internal const val BACKUP_FORMAT_VERSION = 6
 internal const val MIN_BACKUP_FORMAT_VERSION = 1
 internal const val MAX_BACKUP_RECORDS = 200_000
 
@@ -119,6 +119,10 @@ internal data class BackupElement(
     val expression: String?,
     val resultText: String?,
     val ocrRegions: String? = null,
+    val colorArgb: Int? = null,
+    val annotationRects: String? = null,
+    val sourcePageId: String? = null,
+    val sourceRect: String? = null,
 ) : BackupRecord
 
 internal data class BackupBlock(

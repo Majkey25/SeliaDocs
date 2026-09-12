@@ -211,7 +211,7 @@ internal data class StrokePayload(
     val inputs: ByteArray,
 )
 
-internal enum class ElementKind { TEXT, IMAGE, SHAPE, MATH }
+internal enum class ElementKind { TEXT, IMAGE, SHAPE, MATH, HIGHLIGHT, UNDERLINE, STRIKEOUT }
 
 internal const val TEXT_ELEMENT_MAX_LENGTH = 10_000
 
@@ -228,6 +228,10 @@ internal data class ElementDraft(
     val expression: String? = null,
     val resultText: String? = null,
     val ocrRegions: String? = null,
+    val colorArgb: Int? = null,
+    val annotationRects: String? = null,
+    val sourcePageId: String? = null,
+    val sourceRect: String? = null,
 )
 
 @Entity(
@@ -258,6 +262,10 @@ internal data class ElementEntity(
     val expression: String?,
     val resultText: String?,
     val ocrRegions: String? = null,
+    val colorArgb: Int? = null,
+    val annotationRects: String? = null,
+    val sourcePageId: String? = null,
+    val sourceRect: String? = null,
 )
 
 internal data class NotebookContent(

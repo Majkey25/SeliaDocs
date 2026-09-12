@@ -38,6 +38,7 @@ internal data class BackupIndex(
     val elementIds: Set<String>,
     val blockIds: Set<String>,
     val assetIds: Set<String>,
+    val sourcePageIds: Set<String>,
 )
 
 internal class StagedBackup(
@@ -271,6 +272,7 @@ internal class BackupValidator(
         val pageSizes = mutableMapOf<String, Pair<Int, Int>>()
         val strokes = linkedSetOf<String>()
         val elements = linkedSetOf<String>()
+        val sourcePageIds = linkedSetOf<String>()
         val blocks = linkedSetOf<String>()
         val pageNotebooks = mutableMapOf<String, String>()
         val chapterNotebooks = mutableMapOf<String, String>()
@@ -330,6 +332,7 @@ internal class BackupValidator(
                     }
                     is BackupElement -> {
                         addUnique(elements, record.id, "element")
+                        record.sourcePageId?.let(sourcePageIds::add)
                         elementPages += record.id to record.pageId
                         pageElements.getOrPut(record.pageId, ::mutableListOf) += record
                         record.assetId?.let(referencedAssets::add)
@@ -402,6 +405,14 @@ internal class BackupValidator(
         pageElements.forEach { (pageId, records) ->
             val size = pageSizes[pageId] ?: return@forEach
             records.forEach { record ->
+                if (record.annotationRects != null || record.colorArgb != null) {
+                    if (manifest.formatVersion < 6) throw BackupFailure.InvalidRelationship("pdf-markup-version")
+                    if ("pdf-markup" !in manifest.featureFlags) throw BackupFailure.InvalidRelationship("pdf-markup-feature")
+                }
+                if (record.sourcePageId != null || record.sourceRect != null) {
+                    if (manifest.formatVersion < 6) throw BackupFailure.InvalidRelationship("source-links-version")
+                    if ("source-links" !in manifest.featureFlags) throw BackupFailure.InvalidRelationship("source-links-feature")
+                }
                 validateElementBounds(
                     record,
                     size.first,
@@ -442,7 +453,7 @@ internal class BackupValidator(
         imageAssetIds.forEach { assetId -> validateImageAsset(assetId, stagedAssets.getValue(assetId)) }
         pdfSourceRecords.forEach { source -> validatePdfAsset(source, stagedAssets.getValue(source.assetId)) }
         if (stagedAssets.size != manifest.assetCount) countFailure("assetCount")
-        return BackupIndex(notebooks, chapters, pdfSources, pages, strokes, elements, blocks, referencedAssets)
+        return BackupIndex(notebooks, chapters, pdfSources, pages, strokes, elements, blocks, referencedAssets, sourcePageIds)
     }
 
     private fun validateStroke(record: BackupStroke) {

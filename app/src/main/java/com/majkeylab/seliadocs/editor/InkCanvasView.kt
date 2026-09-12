@@ -10,6 +10,7 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.MotionEvent
+import android.view.GestureDetector
 import android.view.View
 import android.widget.FrameLayout
 import androidx.ink.authoring.InProgressStrokeId
@@ -87,6 +88,17 @@ internal class InkCanvasView @JvmOverloads constructor(
     private var pageHeight = 842f
 
     var listener: Listener? = null
+    // This view owns finger streams for page swipes; taps use the same page transform as stylus selection.
+    private val readingTapDetector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onSingleTapUp(event: MotionEvent): Boolean {
+            if (!isEnabled || fingerDrawing || tool != EditorTool.LASSO || hasActiveInteraction() ||
+                event.getToolType(0) != MotionEvent.TOOL_TYPE_FINGER || event.flags and MotionEvent.FLAG_CANCELED != 0
+            ) return false
+            pendingEdits.addLast(PendingEdit.Gesture(GestureKind.LASSO, listOf(pagePoint(event, event.getPointerId(0)))))
+            drainPendingEdits()
+            return true
+        }
+    })
     var fingerDrawing: Boolean = false
     var tool: EditorTool = EditorTool.PEN
     var brush = InkCodec.createBrush(BrushKind.RESPONSIVE_PEN, 0xFF202124.toInt(), 4f)
@@ -284,6 +296,9 @@ internal class InkCanvasView @JvmOverloads constructor(
 
     private fun handleMotionEvent(event: MotionEvent): Boolean {
         predictor.record(event)
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER || event.pointerCount > 1 || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            readingTapDetector.onTouchEvent(event)
+        }
         return when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> startInteraction(event)
             MotionEvent.ACTION_MOVE -> addToInteraction(event)

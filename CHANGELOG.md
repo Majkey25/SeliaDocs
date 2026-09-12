@@ -2,6 +2,31 @@
 
 All notable changes to SeliaSheets are documented here.
 
+## [0.7.0-beta.2] - 2026-09-12
+
+### Fixed
+
+- Selecting a diagram no longer offers unrelated native PDF text outside the selected area. Off-region results fall back to local OCR or image capture.
+
+## [0.7.0-beta.1] - Unreleased candidate
+
+### Added
+
+- Select PDF text with Lasso, then copy, highlight, underline, or strike out the selection. Android 15+ uses native PDF text. Older devices and scanned pages use local OCR when enabled.
+- Copy text or capture a page region into a notebook with a link back to its source. Captures include PDF content, text, annotations, and ink.
+- Edit, recolor, duplicate, delete, and undo text marks. Move and resize captured images with the existing selection handles.
+
+### Fixed
+
+- Finger taps select content in Lasso mode without enabling finger drawing. Swipes and pinches retain page navigation and zoom behavior.
+- Small text marks retain their size when moved or duplicated.
+- Exported highlights preserve black source text. Small image captures preserve detail instead of downsampling the full image to the crop size.
+
+### Changed
+
+- Editable backups use format 6 for PDF marks and source links. Formats 1–5 remain readable. New backups require an updated reader.
+- Room migration 4→5 preserves existing content and adds nullable annotation metadata.
+
 ## [0.6.4-beta.1] - 2026-09-12
 
 ### Fixed

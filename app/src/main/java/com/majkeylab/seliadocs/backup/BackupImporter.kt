@@ -79,6 +79,7 @@ internal class BackupImporter(
                 emptySet()
             }
         val existingPages = if (keepExisting) notebooks.getAllPageIds().toSet() else emptySet()
+        val existingSourcePages = if (keepExisting) pageContent.getAllSourcePageIds().toSet() else emptySet()
         val existingChapters = if (keepExisting) notebooks.getAllChapterIds().toSet() else emptySet()
         val existingPdfSources = if (keepExisting) notebooks.getAllPdfSourceIds().toSet() else emptySet()
         val existingStrokes = if (keepExisting) pageContent.getAllStrokeIds().toSet() else emptySet()
@@ -87,7 +88,7 @@ internal class BackupImporter(
         val notebookMap = mapIds(backup.index.notebookIds, existingNotebooks)
         val chapterMap = mapIds(backup.index.chapterIds, existingChapters)
         val pdfSourceMap = mapIds(backup.index.pdfSourceIds, existingPdfSources)
-        val pageMap = mapIds(backup.index.pageIds, existingPages)
+        val pageMap = mapIds(backup.index.pageIds, existingPages, backup.index.sourcePageIds + existingSourcePages)
         val strokeMap = mapIds(backup.index.strokeIds, existingStrokes)
         val elementMap = mapIds(backup.index.elementIds, existingElements)
         val blockMap = mapIds(backup.index.blockIds, existingBlocks)
@@ -95,10 +96,10 @@ internal class BackupImporter(
         return IdMappings(notebookMap, chapterMap, pdfSourceMap, pageMap, strokeMap, elementMap, blockMap, assetMap)
     }
 
-    private fun mapIds(imported: Set<String>, existing: Set<String>): Map<String, String> {
-        val used = existing.toMutableSet()
+    private fun mapIds(imported: Set<String>, existing: Set<String>, reserved: Set<String> = emptySet()): Map<String, String> {
+        val used = (existing + imported + reserved).toMutableSet()
         return imported.sorted().associateWith { id ->
-            if (used.add(id)) id else nextUnique(used) { idFactory() }
+            if (id !in existing) id else nextUnique(used) { idFactory() }
         }
     }
 
@@ -295,6 +296,10 @@ internal class BackupImporter(
             expression = expression,
             resultText = resultText,
             ocrRegions = ocrRegions,
+            colorArgb = colorArgb,
+            annotationRects = annotationRects,
+            sourcePageId = sourcePageId?.let { mappings.pages[it] ?: it },
+            sourceRect = sourceRect,
         )
 
     private fun BackupBlock.toEntity(mappings: IdMappings) =

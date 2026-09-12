@@ -1,10 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="copy_to_notebook">Copy to notebook</string>
+    <string name="capture_to_notebook">Capture to notebook</string>
+    <string name="open_source_page">Open source page</string>
+    <string name="excerpt_saved">Excerpt copied with a link to its source.</string>
+    <string name="excerpt_source_missing">The source page is missing or in Trash. Your excerpt is still available.</string>
+    <string name="excerpt_failed">Could not copy the excerpt. Try a smaller selection or another page.</string>
+    <string name="please_wait">Please wait…</string>
     <string name="app_name">SeliaSheets</string>
     <string name="new_notebook">New notebook</string>
     <string name="notebook_name">Notebook name</string>
     <string name="create">Create</string>
     <string name="cancel">Cancel</string>
+    <string name="copy_text">Copy text</string>
+    <string name="highlight_text">Highlight</string>
+    <string name="underline_text">Underline</string>
+    <string name="strikeout_text">Strikeout</string>
+    <string name="pdf_selecting_text">Selecting text…</string>
+    <string name="pdf_ocr_selection">Recognized text. Check before copying.</string>
+    <string name="pdf_no_text">No text found in this selection. Try another area or capture it as an image.</string>
+    <string name="pdf_ocr_disabled">Enable image OCR in Settings to select text in scanned PDFs and on older Android devices.</string>
+    <string name="pdf_text_failed">Could not select PDF text. Try a smaller selection.</string>
+    <string name="pdf_selection_hint">Use Lasso to underline or circle PDF text, then copy or mark it.</string>
     <string name="untitled_notebook">Untitled notebook</string>
     <string name="search_notebooks">Search notebooks</string>
     <string name="no_notebooks">Your shelf is empty</string>

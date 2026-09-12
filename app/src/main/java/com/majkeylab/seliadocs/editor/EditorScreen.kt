@@ -2,6 +2,8 @@ package com.majkeylab.seliadocs.editor
 
 import android.app.Application
 import android.net.Uri
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -120,6 +122,7 @@ import com.majkeylab.seliadocs.settings.PEN_WIDTH_RANGE
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asStateFlow
 
 internal enum class SeliaWindowClass { COMPACT, MEDIUM, EXPANDED }
@@ -147,6 +150,7 @@ internal sealed interface EditorAction {
     data class SelectTool(val tool: EditorTool) : EditorAction
     data class EditText(val draft: InlineTextDraft) : EditorAction
     data class SelectPage(val pageId: String) : EditorAction
+    data class OpenSource(val elementId: String) : EditorAction
     data class DuplicatePage(val pageId: String) : EditorAction
     data class DeletePage(val pageId: String) : EditorAction
     data class ImportPdf(val uri: Uri) : EditorAction
@@ -285,7 +289,7 @@ internal class EditorSessionHolder : ViewModel(), ViewModelStoreOwner {
         val action = current.pending
         mutableActionState.value = EditorActionState(
             pending = current.deferredClose,
-            executing = action?.takeIf { it is EditorAction.ImportPdf || it is EditorAction.ImportImage },
+            executing = action?.takeIf { it is EditorAction.ImportPdf || it is EditorAction.ImportImage || it is EditorAction.OpenSource },
         )
         return action
     }
@@ -335,6 +339,9 @@ internal fun EditorRoute(
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    initialPageId: String? = null,
+    onInitialPageOpened: () -> Unit = {},
+    onOpenPage: (String, String) -> Unit = { _, _ -> },
 ) {
     val application = LocalContext.current.applicationContext as Application
     val initialTool =
@@ -367,6 +374,13 @@ internal fun EditorRoute(
         }
     CompositionLocalProvider(LocalViewModelStoreOwner provides sessionHolder) {
         val editorViewModel: EditorViewModel = viewModel(key = "editor", factory = factory)
+        LaunchedEffect(editorViewModel, initialPageId) {
+            if (initialPageId != null) {
+                editorViewModel.state.first { it.pages.isNotEmpty() }
+                editorViewModel.selectPage(initialPageId)
+                onInitialPageOpened()
+            }
+        }
         EditorScreen(
             viewModel = editorViewModel,
             sessionHolder = sessionHolder,
@@ -374,6 +388,7 @@ internal fun EditorRoute(
             onUpdateSettings = onUpdateSettings,
             onBack = onBack,
             onSettings = onSettings,
+            onOpenPage = onOpenPage,
         )
     }
 }
@@ -387,6 +402,7 @@ private fun EditorScreen(
     onUpdateSettings: ((AppSettings) -> AppSettings) -> Unit,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onOpenPage: (String, String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val closeState by sessionHolder.closeState.collectAsStateWithLifecycle()
@@ -404,6 +420,7 @@ private fun EditorScreen(
         }
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val clipboard = LocalContext.current.getSystemService(ClipboardManager::class.java)
     val inkCanvases = remember { mutableSetOf<InkCanvasView>() }
     val onStrokeFinished: (String, androidx.ink.strokes.Stroke) -> Unit = { pageId, stroke ->
         inkCanvases.forEach { it.beginStrokeSave(stroke) }
@@ -415,6 +432,11 @@ private fun EditorScreen(
     var shapeDialogOpen by remember { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var contentsOpen by rememberSaveable { mutableStateOf(false) }
+    var excerptDestinationOpen by remember { mutableStateOf(false) }
+    var excerptAsImage by remember { mutableStateOf(false) }
+    if (excerptDestinationOpen && (state.pdfSelection != null || state.pdfRegion != null)) {
+        ExcerptDestinationDialog(viewModel, excerptAsImage) { excerptDestinationOpen = false }
+    }
     LaunchedEffect(actionState, state.selectedPage?.id) {
         if (state.selectedPage == null) return@LaunchedEffect
         if (actionState.pending != null && !actionState.saving && !actionState.ready && actionState.executing == null) {
@@ -460,6 +482,15 @@ private fun EditorScreen(
             is EditorAction.SelectTool -> viewModel.selectTool(action.tool)
             is EditorAction.EditText -> sessionHolder.beginInlineText(action.draft)
             is EditorAction.SelectPage -> viewModel.selectPage(action.pageId)
+            is EditorAction.OpenSource -> viewModel.openExcerptSource(
+                action.elementId,
+                onOpen = open@{ page ->
+                    if (sessionHolder.actionState.value.pending is EditorAction.Close) return@open
+                    if (page.notebookId == state.notebook?.id) viewModel.selectPage(page.id)
+                    else onOpenPage(page.notebookId, page.id)
+                },
+                onComplete = { sessionHolder.completeExecutingAction(actionEpoch, action) },
+            )
             is EditorAction.DuplicatePage -> viewModel.duplicatePage(action.pageId)
             is EditorAction.DeletePage -> viewModel.deletePage(action.pageId)
             is EditorAction.ImportPdf -> viewModel.importPdf(action.uri) {
@@ -513,7 +544,10 @@ private fun EditorScreen(
         }
         sessionHolder.consumeCompletedClose()
     }
-    BackHandler { requestClose(EditorCloseIntent.BACK) }
+    BackHandler {
+        if (state.pdfSelecting || state.pdfSelection != null || state.pdfSelectionMessage != null) viewModel.dismissPdfSelection()
+        else requestClose(EditorCloseIntent.BACK)
+    }
     val imagePicker =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             val pageId = imagePageId
@@ -687,9 +721,27 @@ private fun EditorScreen(
                             onUpdateSettings = onUpdateSettings,
                         )
                     }
-                    if (contextActionsEnabled && state.selectedElement != null) {
+                    if (contextActionsEnabled && (state.pdfSelecting || state.pdfSelection != null || state.pdfSelectionMessage != null)) {
+                        HorizontalDivider()
+                        PdfSelectionBar(
+                            state.pdfSelection, state.pdfSelecting, state.pdfSelectionMessage,
+                            onCopy = { clipboard.setPrimaryClip(ClipData.newPlainText("PDF text", it)) },
+                            onMarkup = { viewModel.markSelectedPdfText(it, settings.highlighterColorArgb) },
+                            onDismiss = viewModel::dismissPdfSelection,
+                            onExcerpt = { excerptAsImage = false; excerptDestinationOpen = true },
+                            onCapture = state.pdfRegion?.let { { excerptAsImage = true; excerptDestinationOpen = true } },
+                        )
+                    } else if (contextActionsEnabled && state.selectedElement != null) {
                         HorizontalDivider()
                         ElementContextBar(
+                            onCapture = state.pdfRegion?.let { { excerptAsImage = true; excerptDestinationOpen = true } },
+                            onOpenSource = state.selectedElement?.takeIf { it.sourcePageId != null }?.let { element ->
+                                { sessionHolder.requestAction(EditorAction.OpenSource(element.id)) }
+                            },
+                            onCopy = state.selectedElement?.text?.takeIf { it.isNotBlank() }?.let { text ->
+                                { clipboard.setPrimaryClip(ClipData.newPlainText("Selected text", text)) }
+                            },
+                            onColorChange = if (state.selectedElement?.let { isTextMarkup(it.kind) } == true) viewModel::recolorSelectedMarkup else null,
                             onRecognizeText =
                                 if (state.selectedElement?.kind == ElementKind.IMAGE.name) {
                                     viewModel::recognizeSelectedImage
@@ -722,11 +774,18 @@ private fun EditorScreen(
                     } else if (contextActionsEnabled && state.selectedStrokeIds.isNotEmpty()) {
                         HorizontalDivider()
                         InkContextBar(
+                            onCapture = state.pdfRegion?.let { { excerptAsImage = true; excerptDestinationOpen = true } },
                             count = state.selectedStrokeIds.size,
                             onDuplicate = viewModel::duplicateSelectedStrokes,
                             onColorChange = viewModel::recolorSelectedStrokes,
                             onTransform = viewModel::transformSelectedStrokes,
                             onDelete = viewModel::deleteSelectedStrokes,
+                        )
+                    } else if (contextActionsEnabled && state.tool == EditorTool.LASSO && state.selectedPdfSource != null) {
+                        Text(
+                            stringResource(R.string.pdf_selection_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
                     state.recognitionMessage?.let { message ->
@@ -798,6 +857,8 @@ private fun EditorScreen(
                             selectedElementId = state.selectedElementId,
                             smartShapePreviewId = state.smartShapePreviewId,
                             ocrSearchHighlight = state.ocrSearchHighlight,
+                            pdfSelection = state.pdfSelection,
+                            pdfRegion = state.pdfRegion,
                             fingerDrawing = state.notebook?.fingerDrawing == true,
                             tool = state.tool,
                             penWidth = settings.penWidth,
@@ -809,7 +870,7 @@ private fun EditorScreen(
                             onNextPage = selectNextPage,
                             onStrokeFinished = onStrokeFinished,
                             onEraseFinished = viewModel::eraseStrokes,
-                            onSelectContent = viewModel::selectContent,
+                            onSelectContent = { pageId, points -> viewModel.selectContent(pageId, points, settings.imageOcr) },
                             onMoveSelection = viewModel::moveSelectedStrokes,
                             onPageTextChanged = viewModel::updatePageText,
                             onCommitElementTransform = viewModel::updateSelectedElement,
@@ -864,6 +925,8 @@ private fun EditorScreen(
                             selectedElementId = state.selectedElementId,
                             smartShapePreviewId = state.smartShapePreviewId,
                             ocrSearchHighlight = state.ocrSearchHighlight,
+                            pdfSelection = state.pdfSelection,
+                            pdfRegion = state.pdfRegion,
                             fingerDrawing = state.notebook?.fingerDrawing == true,
                             tool = state.tool,
                             penWidth = settings.penWidth,
@@ -875,7 +938,7 @@ private fun EditorScreen(
                             onNextPage = selectNextPage,
                             onStrokeFinished = onStrokeFinished,
                             onEraseFinished = viewModel::eraseStrokes,
-                            onSelectContent = viewModel::selectContent,
+                            onSelectContent = { pageId, points -> viewModel.selectContent(pageId, points, settings.imageOcr) },
                             onMoveSelection = viewModel::moveSelectedStrokes,
                             onPageTextChanged = viewModel::updatePageText,
                             onCommitElementTransform = viewModel::updateSelectedElement,

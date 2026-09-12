@@ -33,10 +33,15 @@ import com.majkeylab.seliadocs.R
 internal fun ElementContextBar(
     onEdit: (() -> Unit)? = null,
     onRecognizeText: (() -> Unit)? = null,
+    onCopy: (() -> Unit)? = null,
+    onOpenSource: (() -> Unit)? = null,
+    onCapture: (() -> Unit)? = null,
+    onColorChange: ((Int) -> Unit)? = null,
     onDuplicate: () -> Unit,
     onBringForward: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    var colorsOpen by rememberSaveable { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surface) {
         Row(
             modifier =
@@ -65,6 +70,34 @@ internal fun ElementContextBar(
                     Text(stringResource(R.string.recognize_image_text))
                 }
             }
+            onCopy?.let { copy ->
+                TextButton(onClick = copy) { Text(stringResource(R.string.copy_text)) }
+            }
+            onOpenSource?.let { open ->
+                TextButton(onClick = open) { Text(stringResource(R.string.open_source_page)) }
+            }
+            onCapture?.let { capture ->
+                TextButton(onClick = capture) { Text(stringResource(R.string.capture_to_notebook)) }
+            }
+            onColorChange?.let { change ->
+                Box {
+                    TextButton(onClick = { colorsOpen = true }) { Text(stringResource(R.string.color)) }
+                    DropdownMenu(expanded = colorsOpen, onDismissRequest = { colorsOpen = false }) {
+                        PEN_COLOR_OPTIONS.forEach { (_, label, color) ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(label)) },
+                                leadingIcon = {
+                                    Surface(color = Color(color), shape = CircleShape, modifier = Modifier.size(20.dp)) {}
+                                },
+                                onClick = {
+                                    colorsOpen = false
+                                    change(color)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
             TextButton(onClick = onDuplicate) {
                 Text(stringResource(R.string.duplicate_element))
             }
@@ -88,6 +121,7 @@ internal fun InkContextBar(
     onColorChange: (Int) -> Unit,
     onTransform: (Float, Float) -> Unit,
     onDelete: () -> Unit,
+    onCapture: (() -> Unit)? = null,
 ) {
     var colorsOpen by rememberSaveable { mutableStateOf(false) }
     var transformOpen by rememberSaveable { mutableStateOf(false) }
@@ -109,6 +143,9 @@ internal fun InkContextBar(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 8.dp),
             )
+            onCapture?.let { capture ->
+                TextButton(onClick = capture) { Text(stringResource(R.string.capture_to_notebook)) }
+            }
             TextButton(onClick = onDuplicate) {
                 Text(stringResource(R.string.duplicate_element))
             }

@@ -16,6 +16,18 @@ import org.junit.Test
 
 class PdfExportImageSampleTest {
     @Test
+    fun captureImageBudgetIsFourMegapixelsWithoutChangingDefaultExport() {
+        assertEquals(2, imageSampleSize(4_096, 4_096, 4_096, 4_096, maxPixels = 4L * 1_024 * 1_024))
+        assertEquals(1, imageSampleSize(4_096, 4_096, 4_096, 4_096))
+        assertEquals(1, imageSampleSize(512, 512, 512, 512, maxPixels = 4L * 1_024 * 1_024))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun zeroImageBudgetIsRejected() {
+        imageSampleSize(100, 100, 100, 100, maxPixels = 0)
+    }
+
+    @Test
     fun largeImageUsesPowerOfTwoSample() {
         assertEquals(8, imageSampleSize(8_192, 8_192, 1_024, 1_024))
     }

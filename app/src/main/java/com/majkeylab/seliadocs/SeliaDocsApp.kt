@@ -68,6 +68,7 @@ internal fun SeliaDocsApp(
         }
     }
     var notebookId by rememberSaveable { mutableStateOf<String?>(null) }
+    var requestedPageId by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
     var backupOpen by rememberSaveable { mutableStateOf(false) }
     var libraryGeneration by rememberSaveable { mutableStateOf(0L) }
@@ -106,6 +107,7 @@ internal fun SeliaDocsApp(
             releaseReplacementClaim = rootBackupViewModel::releaseReplacementClaim,
             onLibraryReplaced = {
                 notebookId = null
+                requestedPageId = null
                 backupOpen = false
                 settingsOpen = false
                 libraryGeneration++
@@ -136,13 +138,19 @@ internal fun SeliaDocsApp(
                 LibraryScreen(
                     viewModel = libraryViewModel,
                     settings = settings,
-                    onOpenNotebook = { notebookId = it },
+                    onOpenNotebook = { requestedPageId = null; notebookId = it },
                     onSettings = { settingsOpen = true },
                 )
             }
             else ->
                 EditorRoute(
                     notebookId = requireNotNull(notebookId),
+                    initialPageId = requestedPageId,
+                    onInitialPageOpened = { requestedPageId = null },
+                    onOpenPage = { targetNotebookId, targetPageId ->
+                        requestedPageId = targetPageId
+                        notebookId = targetNotebookId
+                    },
                     libraryGeneration = libraryGeneration,
                     recognitionModelManager = rootRecognitionModelManager,
                     settings = settings,

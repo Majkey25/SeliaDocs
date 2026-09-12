@@ -27,6 +27,27 @@ internal data class PdfDocumentInfo(val pages: List<PdfPageSize>, val sandboxUid
 internal class PdfSandboxClient(context: Context) {
     private val application = context.applicationContext
 
+    suspend fun selectText(
+        file: File,
+        pageIndex: Int,
+        startX: Float,
+        startY: Float,
+        endX: Float,
+        endY: Float,
+    ): PdfTextSelection? {
+        require(pageIndex >= 0)
+        validatePdfSelectionCoordinates(startX, startY, endX, endY)
+        return withService { service ->
+            withContext(Dispatchers.IO) {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    val result = service.selectText(descriptor, pageIndex, startX, startY, endX, endY)
+                    result.requireSuccess()
+                    decodePdfTextSelection(result)
+                }
+            }
+        }
+    }
+
     suspend fun inspect(file: File): PdfDocumentInfo =
         withService { service ->
             withContext(Dispatchers.IO) {
@@ -138,4 +159,29 @@ internal class PdfSandboxClient(context: Context) {
         val service: IPdfRenderService,
         val connection: ServiceConnection,
     )
+}
+
+@Suppress("DEPRECATION") // Bundle.get preserves type validation on Android 10 as well.
+internal fun decodePdfTextSelection(result: android.os.Bundle): PdfTextSelection? {
+    val found = result.get(PdfProtocol.SELECTION_FOUND) as? Boolean ?: throw IOException("PDF selection status missing or invalid")
+    if (!found) return null
+    val text = result.getString(PdfProtocol.SELECTION_TEXT) ?: throw IOException("PDF selection text missing")
+    val coordinates = result.getFloatArray(PdfProtocol.SELECTION_BOUNDS)
+        ?: throw IOException("PDF selection bounds missing")
+    if (text.length > PdfProtocol.MAX_SELECTION_TEXT || coordinates.size > PdfProtocol.MAX_SELECTION_BOUNDS * 4) {
+        throw IOException(PdfProtocol.ERROR_LIMIT)
+    }
+    if (coordinates.size % 4 != 0) throw IOException("Invalid PDF selection bounds")
+    return try {
+        PdfTextSelection(
+            text,
+            List(coordinates.size / 4) { index ->
+                val offset = index * 4
+                PdfTextBounds(coordinates[offset], coordinates[offset + 1], coordinates[offset + 2], coordinates[offset + 3])
+            },
+            isOcr = false,
+        )
+    } catch (error: IllegalArgumentException) {
+        throw IOException("Invalid PDF selection", error)
+    }
 }
