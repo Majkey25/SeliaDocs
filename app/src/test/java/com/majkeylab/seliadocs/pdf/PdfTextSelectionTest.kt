@@ -5,9 +5,32 @@ import com.majkeylab.seliadocs.recognition.ImageOcrResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PdfTextSelectionTest {
+    @Test
+    fun nativeTextSnappedAboveGraphicDoesNotIntersectGraphicSelection() {
+        val selection = PdfTextSelection("ma", listOf(PdfTextBounds(0.5366667f, 0.225f, 0.6166667f, 0.25125f)), false)
+        assertFalse(selection.intersectsRegion(0.55f, 0.54f, 0.88f, 0.72f))
+        assertFalse(selection.intersectsRegion(0.88f, 0.72f, 0.55f, 0.54f))
+    }
+
+    @Test
+    fun intersectionPreservesPointHorizontalVerticalReverseAndBoundarySelections() {
+        val selection = PdfTextSelection("Word", listOf(PdfTextBounds(0.2f, 0.3f, 0.4f, 0.5f)), false)
+        assertTrue(selection.intersectsRegion(0.3f, 0.4f, 0.3f, 0.4f))
+        assertTrue(selection.intersectsRegion(0.2f, 0.3f, 0.2f, 0.3f))
+        assertTrue(selection.intersectsRegion(0.1f, 0.5f, 0.8f, 0.5f))
+        assertTrue(selection.intersectsRegion(0.8f, 0.5f, 0.1f, 0.5f))
+        assertTrue(selection.intersectsRegion(0.4f, 0.8f, 0.4f, 0.1f))
+        assertFalse(selection.intersectsRegion(0.1f, 0.6f, 0.8f, 0.6f))
+        assertThrows(IllegalArgumentException::class.java) { selection.intersectsRegion(Float.NaN, 0f, 1f, 1f) }
+        val multiline = selection.copy(bounds = selection.bounds + PdfTextBounds(0.7f, 0.7f, 0.8f, 0.8f))
+        assertTrue(multiline.intersectsRegion(0.7f, 0.7f, 0.9f, 0.9f))
+    }
+
     private val words = listOf(
         ImageOcrRegion("First", 0.1f, 0.1f, 0.3f, 0.2f),
         ImageOcrRegion("line", 0.4f, 0.1f, 0.6f, 0.2f),

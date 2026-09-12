@@ -34,6 +34,15 @@ class PdfTextSelectionBackendTest {
     fun cleanUp() { file.delete() }
 
     @Test
+    fun nativeTextAboveGraphicIsNotSelectedWhenLassoOnlyContainsGraphic() = runBlocking {
+        assumeTrue(Build.VERSION.SDK_INT >= 35)
+        createPdf(drawDiagram = true)
+        val selector = PdfTextSelector(context)
+        assertNull(selector.select(file, 0, 0.55f, 0.54f, 0.88f, 0.72f, allowOcr = false))
+        assertNull(selector.select(file, 0, 0.55f, 0.54f, 0.88f, 0.72f, allowOcr = true))
+    }
+
+    @Test
     fun nativeTextSelectionReturnsTextAndNormalizedGeometry() = runBlocking {
         assumeTrue(Build.VERSION.SDK_INT >= 35)
         createPdf()
@@ -153,7 +162,7 @@ class PdfTextSelectionBackendTest {
             Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = 36f })
     }
 
-    private fun createPdf(imageOnly: Boolean = false) {
+    private fun createPdf(imageOnly: Boolean = false, drawDiagram: Boolean = false) {
         val document = PdfDocument()
         try {
             val page = document.startPage(PdfDocument.PageInfo.Builder(600, 800, 1).create())
@@ -164,6 +173,7 @@ class PdfTextSelectionBackendTest {
                 page.canvas.drawText("Alpha Beta Gamma", 60f, 100f,
                     Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; textSize = 36f })
             }
+            if (drawDiagram) page.canvas.drawRect(350f, 450f, 500f, 550f, Paint().apply { color = Color.BLUE })
             document.finishPage(page)
             file.outputStream().use(document::writeTo)
         } finally { document.close() }

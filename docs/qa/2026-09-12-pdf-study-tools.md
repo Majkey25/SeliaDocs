@@ -2,6 +2,8 @@
 
 This work extends the [Flexcil workflow comparison](2026-09-12-flexcil-highlighting.md). It is not a full parity release.
 
+Version 19 was an unsubmitted Play draft. Android 17 CI caught off-region native text snapping before publication. Version 20 (`0.7.0-beta.2`) supersedes that candidate; native text must intersect the requested selection area.
+
 ## Implemented paths
 
 - The isolated PDF service returns selected text and normalized rectangles on Android 15+. Older devices and scanned pages use local word OCR when image OCR is enabled.

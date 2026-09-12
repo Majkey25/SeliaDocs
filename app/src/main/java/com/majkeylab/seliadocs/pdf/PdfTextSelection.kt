@@ -19,6 +19,15 @@ internal data class PdfTextSelection(val text: String, val bounds: List<PdfTextB
     }
 }
 
+internal fun PdfTextSelection.intersectsRegion(startX: Float, startY: Float, endX: Float, endY: Float): Boolean {
+    validatePdfSelectionCoordinates(startX, startY, endX, endY)
+    val left = minOf(startX, endX)
+    val top = minOf(startY, endY)
+    val right = maxOf(startX, endX)
+    val bottom = maxOf(startY, endY)
+    return bounds.any { it.right >= left && it.left <= right && it.bottom >= top && it.top <= bottom }
+}
+
 internal fun validatePdfSelectionCoordinates(startX: Float, startY: Float, endX: Float, endY: Float) {
     require(listOf(startX, startY, endX, endY).all { it.isFinite() && it in 0f..1f }) {
         "PDF selection coordinates must be finite and normalized"

@@ -26,7 +26,9 @@ internal class PdfTextSelector(context: Context) {
         require(pageIndex >= 0)
         validatePdfSelectionCoordinates(startX, startY, endX, endY)
         if (Build.VERSION.SDK_INT >= 35) {
-            sandbox.selectText(file, pageIndex, startX, startY, endX, endY)?.let { return it }
+            sandbox.selectText(file, pageIndex, startX, startY, endX, endY)
+                ?.takeIf { it.intersectsRegion(startX, startY, endX, endY) }
+                ?.let { return it }
         } else if (!allowOcr) {
             throw UnsupportedOperationException(PdfProtocol.ERROR_SELECTION_UNSUPPORTED)
         }

@@ -2,7 +2,13 @@
 
 All notable changes to SeliaSheets are documented here.
 
-## [0.7.0-beta.1] - 2026-09-12
+## [0.7.0-beta.2] - 2026-09-12
+
+### Fixed
+
+- Selecting a diagram no longer offers unrelated native PDF text outside the selected area. Off-region results fall back to local OCR or image capture.
+
+## [0.7.0-beta.1] - Unreleased candidate
 
 ### Added
 
