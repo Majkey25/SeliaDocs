@@ -2,6 +2,17 @@
 
 All notable changes to SeliaSheets are documented here.
 
+## [0.6.4-beta.1] - 2026-09-12
+
+### Fixed
+
+- Settings refreshes no longer replace highlights while their saves are pending. Failed saves remove unsaved ink, and completed groups reconcile with the latest page snapshot.
+- Highlighter opacity is validated so an invisible saved brush setting cannot disagree with the controls.
+
+### Added
+
+- Highlighter opacity slider from 10% to 80%. Color changes preserve opacity. The unrelated Smart shapes switch is hidden for highlighters.
+
 ## [0.6.3-beta.1] - 2026-09-12
 
 ### Fixed

@@ -54,6 +54,10 @@ import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import com.majkeylab.seliadocs.settings.SettingsRepository
+import kotlinx.coroutines.flow.first
+import java.util.concurrent.atomic.AtomicBoolean
 import com.majkeylab.seliadocs.MainActivity
 import com.majkeylab.seliadocs.SeliaDocsApp
 import com.majkeylab.seliadocs.data.LibraryMutationGate
@@ -80,6 +84,223 @@ import org.junit.runner.RunWith
 class EditorCompactUiTest {
     @get:Rule
     val rule = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun savingFirstHighlightDoesNotHideSecondPendingHighlight() = assertPendingHighlightGroup(eraseBetween = false)
+
+    @Test
+    fun erasingBetweenPendingHighlightsDoesNotLeaveGhostInk() = assertPendingHighlightGroup(eraseBetween = true)
+
+    private fun assertPendingHighlightGroup(eraseBetween: Boolean) {
+        openCompactEditor()
+        selectTool("highlighter")
+        val editor = rule.runOnIdle {
+            val holder = ViewModelProvider(rule.activity)["editor-session-holder", EditorSessionHolder::class.java]
+            ViewModelProvider(holder)["editor", EditorViewModel::class.java]
+        }
+        val firstAcquired = CountDownLatch(1)
+        val secondAcquired = CountDownLatch(1)
+        val releaseFirst = CompletableDeferred<Unit>()
+        val releaseSecond = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(Dispatchers.IO)
+        val firstOwner = scope.launch {
+            LibraryMutationGate.withLock { firstAcquired.countDown(); releaseFirst.await() }
+        }
+        var secondOwner: kotlinx.coroutines.Job? = null
+        var canvasView: InkCanvasView? = null
+        fun drawAndHandOff(origin: Float, inputToolType: Int = MotionEvent.TOOL_TYPE_STYLUS) {
+            val handedOff = AtomicBoolean(false)
+            drawNativeStrokeThen(origin, EditorTool.HIGHLIGHTER, inputToolType) { canvas ->
+                canvasView = canvas
+                rule.activity.lifecycleScope.launch { canvas.awaitPendingCommits(); handedOff.set(true) }
+            }
+            rule.waitUntil(10_000) { handedOff.get() }
+        }
+        fun secondBlue(xFraction: Float = 0.7f, yFraction: Float = 0.65f): Int {
+            val paper = rule.onNodeWithTag("page-paper").fetchSemanticsNode().boundsInRoot
+            val offset = IntArray(2)
+            rule.runOnUiThread { rule.activity.findViewById<View>(android.R.id.content).getLocationOnScreen(offset) }
+            val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+            return try {
+                Color.blue(bitmap.getPixel((offset[0] + paper.left + paper.width * xFraction).toInt(),
+                    (offset[1] + paper.top + paper.height * yFraction).toInt()))
+            } finally { bitmap.recycle() }
+        }
+        val settings = SettingsRepository.create(rule.activity.application)
+        val previous = runBlocking { settings.settings.first() }
+        try {
+            assertTrue(firstAcquired.await(5, TimeUnit.SECONDS))
+            val before = secondBlue()
+            val firstBefore = secondBlue(0.4f, 0.35f)
+            drawAndHandOff(0.3f)
+            if (eraseBetween) drawAndHandOff(0.3f, MotionEvent.TOOL_TYPE_ERASER)
+            secondOwner = scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                LibraryMutationGate.withLock { secondAcquired.countDown(); releaseSecond.await() }
+            }
+            drawAndHandOff(0.6f)
+            rule.waitUntil(5_000) { secondBlue() < before - 15 }
+            releaseFirst.complete(Unit)
+            assertTrue(secondAcquired.await(5, TimeUnit.SECONDS))
+            val originalBrush = rule.runOnIdle { requireNotNull(canvasView).brush }
+            runBlocking { settings.update { it.copy(penWidth = if (it.penWidth == 4f) 5f else 4f) } }
+            rule.waitUntil(5_000) { rule.runOnIdle { requireNotNull(canvasView).brush !== originalBrush } }
+            rule.waitForIdle()
+            assertTrue("Saving the first stroke hid another pending highlight", secondBlue() < before - 15)
+            releaseSecond.complete(Unit)
+            rule.waitUntil(10_000) { editor.state.value.strokes.size == if (eraseBetween) 1 else 2 }
+            if (eraseBetween) rule.waitUntil(5_000) { secondBlue(0.4f, 0.35f) >= firstBefore - 5 }
+            rule.waitUntil(5_000) { secondBlue() < before - 15 }
+        } finally {
+            releaseFirst.complete(Unit)
+            releaseSecond.complete(Unit)
+            runBlocking {
+                firstOwner.join()
+                secondOwner?.join()
+                settings.update { it.copy(penWidth = previous.penWidth) }
+            }
+        }
+    }
+
+    @Test
+    fun failedHighlighterSaveRemovesUnstoredInk() = assertHighlighterSaveOutcome(failSave = true)
+
+    @Test
+    fun queuedUndoDoesNotLeaveGhostHighlighter() = assertHighlighterSaveOutcome(failSave = false)
+
+    private fun assertHighlighterSaveOutcome(failSave: Boolean) {
+        openCompactEditor()
+        selectTool("highlighter")
+        val editor = rule.runOnIdle {
+            val holder = ViewModelProvider(rule.activity)["editor-session-holder", EditorSessionHolder::class.java]
+            ViewModelProvider(holder)["editor", EditorViewModel::class.java]
+        }
+        val pageId = requireNotNull(editor.state.value.selectedPage).id
+        val database = SeliaDocsDatabase.get(rule.activity.application)
+        if (failSave) runBlocking(Dispatchers.IO) {
+            database.openHelper.writableDatabase.execSQL(
+                "CREATE TEMP TRIGGER qa_fail_highlight BEFORE INSERT ON strokes " +
+                    "WHEN NEW.pageId = '${pageId.replace("'", "''")}' " +
+                    "BEGIN SELECT RAISE(ABORT, 'Forced highlight save failure'); END",
+            )
+        }
+        val acquired = CountDownLatch(1)
+        val release = CompletableDeferred<Unit>()
+        val owner = CoroutineScope(Dispatchers.IO).launch {
+            LibraryMutationGate.withLock { acquired.countDown(); release.await() }
+        }
+        fun yellowPixels(): Int {
+            val paper = rule.onNodeWithTag("page-paper").fetchSemanticsNode().boundsInRoot
+            val offset = IntArray(2)
+            rule.runOnUiThread {
+                rule.activity.findViewById<View>(android.R.id.content).getLocationOnScreen(offset)
+            }
+            val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+            return try {
+                var count = 0
+                for (y in (paper.top.toInt() + offset[1]).coerceAtLeast(0) until
+                    (paper.bottom.toInt() + offset[1]).coerceAtMost(bitmap.height) step 2) {
+                    for (x in (paper.left.toInt() + offset[0]).coerceAtLeast(0) until
+                        (paper.right.toInt() + offset[0]).coerceAtMost(bitmap.width) step 2) {
+                        val color = bitmap.getPixel(x, y)
+                        if (Color.red(color) > 180 && Color.green(color) > 130 &&
+                            Color.red(color) > Color.blue(color) + 30 && Color.green(color) > Color.blue(color) + 20) count++
+                    }
+                }
+                count
+            } finally { bitmap.recycle() }
+        }
+        try {
+            assertTrue(acquired.await(5, TimeUnit.SECONDS))
+            assertEquals(0, yellowPixels())
+            val handedOff = AtomicBoolean(false)
+            drawNativeStrokeThen(expectedTool = EditorTool.HIGHLIGHTER) { canvas ->
+                rule.activity.lifecycleScope.launch {
+                    canvas.awaitPendingCommits()
+                    handedOff.set(true)
+                }
+            }
+            rule.waitUntil(10_000) { handedOff.get() }
+            rule.waitUntil(10_000) { yellowPixels() > 50 }
+            if (!failSave) rule.runOnUiThread { editor.undo() }
+            release.complete(Unit)
+            rule.waitUntil(10_000) {
+                val state = editor.state.value
+                if (failSave) state.failed else state.canRedo
+            }
+            rule.waitUntil(5_000) { yellowPixels() == 0 }
+            runBlocking { assertTrue(SeliaDocsRepository(database).getStrokes(pageId).isEmpty()) }
+            rule.onNodeWithTag("compact-tool-highlighter").assertIsSelected()
+        } finally {
+            release.complete(Unit)
+            runBlocking(Dispatchers.IO) {
+                owner.join()
+                if (failSave) database.openHelper.writableDatabase.execSQL("DROP TRIGGER qa_fail_highlight")
+            }
+        }
+    }
+
+    @Test
+    fun highlighterSurvivesSettingsRefreshWhileSaving() {
+        openCompactEditor()
+        selectTool("type")
+        rule.onNodeWithTag("page-text").performTextInput("Text and highlights stay together.\n".repeat(12))
+        selectTool("highlighter")
+        val paper = rule.onNodeWithTag("page-paper").fetchSemanticsNode().boundsInRoot
+        val offset = IntArray(2)
+        rule.runOnUiThread {
+            rule.activity.findViewById<View>(android.R.id.content).getLocationOnScreen(offset)
+        }
+        val x = (offset[0] + paper.left + paper.width * 0.4f).toInt()
+        val y = (offset[1] + paper.top + paper.height * 0.35f).toInt()
+        fun blue(): Int {
+            val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+            return try { Color.blue(bitmap.getPixel(x, y)) } finally { bitmap.recycle() }
+        }
+        fun findCanvas(view: View): InkCanvasView? {
+            if (view is InkCanvasView) return view
+            if (view is ViewGroup) repeat(view.childCount) { index ->
+                findCanvas(view.getChildAt(index))?.let { return it }
+            }
+            return null
+        }
+        val canvas = rule.runOnIdle { requireNotNull(findCanvas(rule.activity.window.decorView)) }
+        val settings = SettingsRepository.create(rule.activity.application)
+        val previous = runBlocking { settings.settings.first() }
+        val acquired = CountDownLatch(1)
+        val release = CompletableDeferred<Unit>()
+        val owner = CoroutineScope(Dispatchers.IO).launch {
+            LibraryMutationGate.withLock {
+                acquired.countDown()
+                release.await()
+            }
+        }
+        try {
+            assertTrue(acquired.await(5, TimeUnit.SECONDS))
+            val before = blue()
+            drawNativeStrokeThen(expectedTool = EditorTool.HIGHLIGHTER) {}
+            val handedOff = AtomicBoolean(false)
+            rule.runOnUiThread {
+                rule.activity.lifecycleScope.launch {
+                    canvas.awaitPendingCommits()
+                    handedOff.set(true)
+                }
+            }
+            rule.waitUntil(10_000) { handedOff.get() }
+            rule.waitUntil(5_000) { blue() < before - 15 }
+            val originalBrush = rule.runOnIdle { canvas.brush }
+            runBlocking { settings.update { it.copy(penWidth = if (it.penWidth == 4f) 5f else 4f) } }
+            rule.waitUntil(5_000) { rule.runOnIdle { canvas.brush !== originalBrush } }
+            rule.waitForIdle()
+            assertTrue("A settings refresh hid unsaved highlighter ink", blue() < before - 15)
+            rule.onNodeWithTag("compact-tool-highlighter").assertIsSelected()
+        } finally {
+            release.complete(Unit)
+            runBlocking {
+                owner.join()
+                settings.update { it.copy(penWidth = previous.penWidth) }
+            }
+        }
+    }
 
     @Test
     fun savedHighlighterStaysVisibleWithoutSwitchingTools() {
@@ -155,7 +376,8 @@ class EditorCompactUiTest {
     private fun drawNativeStrokeThen(
         origin: Float = 0.3f,
         expectedTool: EditorTool = EditorTool.PEN,
-        action: () -> Unit,
+        inputToolType: Int = MotionEvent.TOOL_TYPE_STYLUS,
+        action: (InkCanvasView) -> Unit,
     ) {
         rule.runOnUiThread {
             fun findCanvas(view: View): InkCanvasView? {
@@ -173,7 +395,7 @@ class EditorCompactUiTest {
             listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP).forEachIndexed { index, action ->
                 val event = MotionEvent.obtain(
                     time, time + index * 16L, action, 1,
-                    arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS }),
+                    arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = inputToolType }),
                     arrayOf(MotionEvent.PointerCoords().apply {
                         x = canvas.width * (origin + index * 0.1f)
                         y = canvas.height * (origin + index * 0.05f)
@@ -183,7 +405,7 @@ class EditorCompactUiTest {
                 )
                 try { canvas.dispatchTouchEvent(event) } finally { event.recycle() }
             }
-            action()
+            action(canvas)
         }
     }
 

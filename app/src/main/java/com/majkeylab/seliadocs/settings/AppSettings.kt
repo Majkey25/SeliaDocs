@@ -35,6 +35,9 @@ internal data class AppSettings(
         copy(
             penWidth = penWidth.coerceIn(PEN_WIDTH_RANGE),
             highlighterWidth = highlighterWidth.coerceIn(HIGHLIGHTER_WIDTH_RANGE),
+            // Match the highlighter control's 10-80% opacity range without changing its RGB.
+            highlighterColorArgb =
+                ((highlighterColorArgb ushr 24).coerceIn(26, 204) shl 24) or (highlighterColorArgb and 0x00FFFFFF),
         )
 }
 

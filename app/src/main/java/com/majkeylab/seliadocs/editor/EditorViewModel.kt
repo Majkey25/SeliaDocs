@@ -478,6 +478,7 @@ internal class EditorViewModel(
         shapeAssist: Boolean = true,
         handwritingRecognition: Boolean = false,
         recognitionLanguage: RecognitionLanguage = RecognitionLanguage.CZECH,
+        onComplete: (Boolean) -> Unit = {},
     ) {
         val encoded = InkCodec.encode(stroke)
         val toolAtFinish =
@@ -500,7 +501,7 @@ internal class EditorViewModel(
                 clearRecognition()
                 recognitionInvalidationEpoch
             }
-        mutate(cancelRecognition = false) {
+        mutate(cancelRecognition = false, onComplete = onComplete) {
             val effectiveCallbackEpoch =
                 callbackEpoch ?: invalidateRecognitionForNewInk(pageId, recognitionLanguage, toolAtFinish)
             val history = history(pageId)

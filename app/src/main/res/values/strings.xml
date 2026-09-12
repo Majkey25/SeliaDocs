@@ -155,6 +155,8 @@
     <string name="default_tool">Default tool</string>
     <string name="pen_width">Pen width</string>
     <string name="highlighter_width">Highlighter width</string>
+    <string name="highlighter_opacity">Highlighter opacity</string>
+    <string name="highlighter_opacity_value">Opacity: %1$d%%</string>
     <string name="brush_width_value">%1$d pt</string>
     <string name="brush_color_black">Black</string>
     <string name="brush_color_blue">Blue</string>
