@@ -1,0 +1,29 @@
+# Highlighter visibility at zoom
+
+## Reproduction
+
+On the Huawei YAL-L21 running Android 10, an unzoomed highlighter appeared while drawing and after saving. At 2x zoom, the live stroke was displaced from the pen.
+
+The failure reproduced through both direct View dispatch and real OS input injection. The OS-injected stroke ran from screen `(188, 975)` to `(892, 975)`. The center pixel's blue channel stayed at 250 instead of changing to the highlighter color. Native event logging confirmed the correct local end coordinate `(1232, 996)` in the page-sized view. Its live SurfaceView occupied 1760 x 2490 pixels at screen `(-340, -21)`.
+
+The failure was in live presentation, not the incoming coordinate conversion. Earlier saved-stroke tests did not check these screen pixels while the pen was down.
+
+Local evidence:
+
+- `.reference/tmp/device-qa-20260912-103330-155.log`: unzoomed native view passed.
+- `.reference/tmp/device-qa-20260912-103551-862.log`: complete editor saved-highlighter check passed.
+- `.reference/tmp/device-qa-20260912-103714-135.log`: zoomed pixel check failed, other two checks passed.
+- `.reference/tmp/device-qa-20260912-104944-564.log`: OS-injected zoomed case failed before the fix.
+- `.reference/tmp/highlighter-zoom-2-before.png`: generated blank test page with displaced live ink.
+
+## Fix
+
+`InkCanvasView` keeps its page-sized input and completed-stroke layer. Only `InProgressStrokesView` is measured and positioned within the intersection of the page and viewport. `motionEventToViewTransform` translates incoming page-view coordinates into that smaller live surface. Stored brush inputs, eraser/lasso coordinates, and backup formats are unchanged.
+
+The original three pixel checks passed after this change. Both pan-direction checks also passed. Logs: `.reference/tmp/device-qa-20260912-105641-012.log` and `.reference/tmp/device-qa-20260912-105934-830.log`. Temporary production coordinate logging was removed. Local compilation, JVM tests, and lint passed before the version-code bump. Candidate version 17 still requires the full release checks.
+
+These are injected stylus tests on a physical phone, not physical active-pen pressure, tilt, or vendor-button certification.
+
+## Reference document
+
+The supplied `Notes_260911_155212.pdf` contains 4,544,074 zero bytes. Poppler cannot read a PDF header or trailer, and a binary scan finds no nonzero content. Its application, screenshots, and feature list cannot be recovered from this copy. No claim of reference-app parity or download is made.

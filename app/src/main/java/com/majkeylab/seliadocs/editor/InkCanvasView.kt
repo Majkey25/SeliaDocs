@@ -7,6 +7,7 @@ import android.graphics.DashPathEffect
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -19,6 +20,7 @@ import androidx.ink.rendering.android.view.ViewStrokeRenderer
 import androidx.ink.strokes.Stroke
 import androidx.input.motionprediction.MotionEventPredictor
 import kotlinx.coroutines.CompletableDeferred
+import kotlin.math.roundToInt
 
 internal enum class EditorTool { TYPE, PEN, PENCIL, HIGHLIGHTER, ERASER, LASSO }
 
@@ -72,6 +74,11 @@ internal class InkCanvasView @JvmOverloads constructor(
     private var pendingCommit: CompletableDeferred<Unit>? = null
     private val gesturePoints = mutableListOf<CanvasPoint>()
     private val identity = Matrix()
+    private val liveBounds = Rect()
+    private var viewportWidth = 0
+    private var viewportHeight = 0
+    private var viewportPanX = 0f
+    private var viewportPanY = 0f
     private val touchListener = OnTouchListener { _, event -> handleMotionEvent(event) }
     private var gesturePointerId: Int? = null
     private var gestureKind: GestureKind? = null
@@ -110,6 +117,43 @@ internal class InkCanvasView @JvmOverloads constructor(
         pageHeight = height.toFloat()
         finishedView.setPageSize(pageWidth, pageHeight)
         gestureOverlay.setPageSize(pageWidth, pageHeight)
+    }
+
+    fun setVisibleViewport(width: Int, height: Int, panX: Float, panY: Float) {
+        require(width >= 0 && height >= 0 && panX.isFinite() && panY.isFinite())
+        if (viewportWidth == width && viewportHeight == height && viewportPanX == panX && viewportPanY == panY) return
+        viewportWidth = width
+        viewportHeight = height
+        viewportPanX = panX
+        viewportPanY = panY
+        requestLayout()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        liveBounds.set(0, 0, measuredWidth, measuredHeight)
+        if (viewportWidth > 0 && viewportHeight > 0) {
+            val x = ((measuredWidth - viewportWidth) / 2f - viewportPanX).roundToInt()
+            val y = ((measuredHeight - viewportHeight) / 2f - viewportPanY).roundToInt()
+            liveBounds.set(
+                x.coerceIn(0, measuredWidth), y.coerceIn(0, measuredHeight),
+                (x + viewportWidth).coerceIn(0, measuredWidth),
+                (y + viewportHeight).coerceIn(0, measuredHeight),
+            )
+        }
+        inProgressView.measure(
+            MeasureSpec.makeMeasureSpec(liveBounds.width(), MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(liveBounds.height(), MeasureSpec.EXACTLY),
+        )
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        inProgressView.layout(liveBounds.left, liveBounds.top, liveBounds.right, liveBounds.bottom)
+        // Keep the low-latency surface within the viewport; input remains in page-view coordinates.
+        inProgressView.motionEventToViewTransform = Matrix().apply {
+            setTranslate(-liveBounds.left.toFloat(), -liveBounds.top.toFloat())
+        }
     }
 
     fun dispatchScreenMotionEvent(event: MotionEvent): Boolean {
