@@ -3,6 +3,7 @@ package com.majkeylab.seliadocs.editor
 import android.app.UiAutomation
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Rect
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
@@ -10,6 +11,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
@@ -36,12 +38,15 @@ class ReleaseInkSmokeTest {
         val before = requireNotNull(automation.takeScreenshot()) { "Pre-stroke screenshot unavailable" }
         var beforeStroke = before
         var after: Bitmap? = null
+        var settled: Bitmap? = null
         try {
             val sx = requiredCoordinate("startX", before.width)
             val sy = requiredCoordinate("startY", before.height)
             val ex = requiredCoordinate("endX", before.width)
             val ey = requiredCoordinate("endY", before.height)
             require(sx != ex || sy != ey) { "Stroke coordinates must differ" }
+            requireRootBounds(automation, sx, sy, ex, ey)
+            saveScreenshot(before, "before")
             if (arguments.getString("pinchBeforeStroke") == "true") {
                 val zoomBefore = requireNotNull(zoomPercent(automation)) { "Zoom state unavailable before pinch" }
                 injectPinch(automation, sx, sy, ex, ey)
@@ -49,27 +54,61 @@ class ReleaseInkSmokeTest {
                 val zoomAfter = requireNotNull(zoomPercent(automation)) { "Zoom state unavailable after pinch" }
                 assertTrue("Pinch did not increase zoom: $zoomBefore% to $zoomAfter%", zoomAfter > zoomBefore)
                 beforeStroke = requireNotNull(automation.takeScreenshot()) { "Post-pinch screenshot unavailable" }
+                saveScreenshot(beforeStroke, "after-pinch")
             }
             val toolType =
                 if (arguments.getString("fingerInput") == "true") MotionEvent.TOOL_TYPE_FINGER
                 else MotionEvent.TOOL_TYPE_STYLUS
+            requireRootBounds(automation, sx, sy, ex, ey)
             injectStroke(automation, sx, sy, ex, ey, toolType)
             SystemClock.sleep(750)
             automation.waitForIdle(200, 2_000)
             val captured = requireNotNull(automation.takeScreenshot()) { "Post-stroke screenshot unavailable" }
             after = captured
+            saveScreenshot(captured, "after")
+            requireRootBounds(automation, sx, sy, ex, ey)
             assertTrue(
                 "Screenshot size changed",
                 beforeStroke.width == captured.width && beforeStroke.height == captured.height,
             )
+            val changed = visibleBlueChanges(beforeStroke, captured, sx, sy, ex, ey)
             assertTrue(
                 "No visible blue ink appeared near the injected stroke",
-                visibleBlueChanges(beforeStroke, captured, sx, sy, ex, ey) >= 12,
+                changed >= 12,
             )
+            SystemClock.sleep(1_250)
+            requireRootBounds(automation, sx, sy, ex, ey)
+            val final = requireNotNull(automation.takeScreenshot()) { "Settled screenshot unavailable" }
+            settled = final
+            saveScreenshot(final, "settled")
+            assertEquals(beforeStroke.width, final.width)
+            assertEquals(beforeStroke.height, final.height)
+            val retained = visibleBlueChanges(beforeStroke, final, sx, sy, ex, ey)
+            assertTrue("Blue ink disappeared after handoff: $retained/$changed pixels", retained >= changed * 0.9f)
+            val moved = visibleBlueChanges(captured, final, sx, sy, ex, ey)
+            assertTrue("Blue ink moved after handoff: $moved/$changed pixels", moved <= changed * 0.1f)
         } finally {
             if (beforeStroke !== before) beforeStroke.recycle()
             before.recycle()
             after?.recycle()
+            settled?.recycle()
+        }
+    }
+
+    private fun requireRootBounds(automation: UiAutomation, sx: Float, sy: Float, ex: Float, ey: Float) {
+        val root = requireNotNull(automation.rootInActiveWindow) { "No foreground app root" }
+        assertEquals("com.majkeylab.seliadocs", root.packageName?.toString())
+        val bounds = Rect().also(root::getBoundsInScreen)
+        require(bounds.contains(sx.roundToInt(), sy.roundToInt()) && bounds.contains(ex.roundToInt(), ey.roundToInt())) {
+            "Stroke endpoints must be inside signed-app root bounds $bounds"
+        }
+    }
+
+    private fun saveScreenshot(bitmap: Bitmap, stage: String) {
+        if (InstrumentationRegistry.getArguments().getString("releaseInkScreenshots") != "true") return
+        val directory = requireNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null))
+        File(directory, "release-ink-$stage.png").outputStream().use {
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) { "Screenshot could not be saved" }
         }
     }
 

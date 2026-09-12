@@ -21,6 +21,7 @@ This work extends the [Flexcil workflow comparison](2026-09-12-flexcil-highlight
 - Android 17 CI passed the backend increment in [run 34705329886](https://github.com/Majkey25/SeliaSheets/actions/runs/34705329886). Its Android 10 job exposed the deletion-test synchronization race described below.
 - A clean version-19 build passed all JVM/lint tasks and produced signed APK/AAB outputs. APK verification confirms one expected signer, package `com.majkeylab.seliadocs`, version `0.7.0-beta.1`, minSdk 29, targetSdk 37, and 16 KB alignment. AAB verification reports the existing self-signed-certificate, timestamp, POSIX-attribute, and JAR stream-order warnings.
 - Huawei version 19, `device-qa-20260912-191714-168.log`: all 28 final PDF study, capture, export, legacy-ID, migration, and backup tests passed.
+- Signed version 19 passed `ReleaseInkSmokeTest` with explicit stylus pressure events, first at fit and then with `pinchBeforeStroke=true`. The test checks foreground package, visible blue pixels, and stability after handoff. Existing signed-app notes survived the upgrade. The temporary smoke-test page was removed afterward.
 
 ## Bugs and test defects found
 
@@ -33,6 +34,8 @@ This work extends the [Flexcil workflow comparison](2026-09-12-flexcil-highlight
 - Source references accept the same bounded opaque identifiers as legacy pages, including Unicode and punctuation. They are resolved through Room, not filesystem paths or URLs.
 - Captures use 2048-pixel page rasters and a 4MP inserted-image decode budget. Ordinary PDF export retains its 4096-pixel/16MP limits. The capture bitmap-buffer calculation is at most 64 MiB; this is not a measured heap peak.
 - Android 10 CI exposed an existing deletion-test race: Room emitted the deleted stroke list before selection/history controls updated. The test now awaits the complete state and retains its kept-stroke and Undo assertions.
+- The integrated Android 10 run completed 371 tests with one existing history-toolbar synchronization failure and four expected skips. That test now waits for asynchronous Undo completion and settled tool state. Its focused Huawei rerun passed in `device-qa-20260912-194155-230.log`.
+- The integrated Android 17 run failed before app input because a SystemUI boot ANR dialog held focus. CI now builds APKs before starting the emulator to separate compilation from boot load. Native focus checks and stylus assertions remain unchanged; a fresh CI run must verify the change.
 
 ## Remaining acceptance
 

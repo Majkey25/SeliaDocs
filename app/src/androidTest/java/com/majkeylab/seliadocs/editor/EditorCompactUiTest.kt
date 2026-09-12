@@ -762,12 +762,18 @@ class EditorCompactUiTest {
             runCatching { rule.onNodeWithTag("compact-undo").assertIsEnabled() }.isSuccess
         }
         rule.onNodeWithTag("compact-undo").performClick()
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag("compact-redo").assertIsEnabled() }.isSuccess
+        }
         rule.onNodeWithTag("compact-redo").assertIsEnabled()
-        rule.onNodeWithTag("compact-tool-type").performClick()
+        selectTool("type")
         rule.onNodeWithTag("compact-undo").assertIsNotEnabled()
         rule.onNodeWithTag("compact-redo").assertIsNotEnabled()
 
-        rule.onNodeWithTag("compact-tool-pencil").performClick()
+        selectTool("pencil")
+        rule.waitUntil(5_000) {
+            runCatching { rule.onNodeWithTag("compact-redo").assertIsEnabled() }.isSuccess
+        }
         rule.onNodeWithTag("compact-redo").assertIsEnabled()
         rule.onNodeWithTag("compact-insert").performClick()
         rule.onNodeWithTag("compact-insert-text").performClick()
