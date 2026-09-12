@@ -111,6 +111,14 @@ internal class InkCanvasView @JvmOverloads constructor(
         finishedView.setStrokes(strokes, selected)
     }
 
+    fun finishStrokeSave(stroke: Stroke, succeeded: Boolean) {
+        finishedView.finishStrokeSave(stroke, succeeded)
+    }
+
+    fun beginStrokeSave(stroke: Stroke) {
+        finishedView.beginStrokeSave(stroke)
+    }
+
     fun setPageSize(width: Int, height: Int) {
         require(width > 0 && height > 0)
         pageWidth = width.toFloat()
@@ -597,6 +605,8 @@ private class GestureOverlayView(context: Context) : View(context) {
 
 private class FinishedInkView(context: Context) : View(context) {
     private val strokes = mutableListOf<Stroke>()
+    private val pendingSaves = mutableSetOf<Stroke>()
+    private var suppliedStrokes: List<Stroke> = emptyList()
     private val renderer = ViewStrokeRenderer(CanvasStrokeRenderer.create(), this)
     private val selectionPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -616,10 +626,27 @@ private class FinishedInkView(context: Context) : View(context) {
     }
 
     fun setStrokes(values: List<Stroke>, selected: Set<Int>) {
-        strokes.clear()
-        strokes.addAll(values)
+        suppliedStrokes = values.toList()
+        // The database may contain only part of a handed-off group while its saves are queued.
+        if (pendingSaves.isEmpty()) applySuppliedStrokes()
         this.selected = selected
         invalidate()
+    }
+
+    fun finishStrokeSave(stroke: Stroke, succeeded: Boolean) {
+        if (!pendingSaves.remove(stroke)) return
+        if (!succeeded) strokes.removeAll { it === stroke }
+        if (pendingSaves.isEmpty()) applySuppliedStrokes()
+        invalidate()
+    }
+
+    private fun applySuppliedStrokes() {
+        strokes.clear()
+        strokes.addAll(suppliedStrokes)
+    }
+
+    fun beginStrokeSave(stroke: Stroke) {
+        if (strokes.any { it === stroke }) pendingSaves.add(stroke)
     }
 
     fun addStrokes(values: Collection<Stroke>) {

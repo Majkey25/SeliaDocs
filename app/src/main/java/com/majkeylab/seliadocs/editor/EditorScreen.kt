@@ -405,6 +405,12 @@ private fun EditorScreen(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val inkCanvases = remember { mutableSetOf<InkCanvasView>() }
+    val onStrokeFinished: (String, androidx.ink.strokes.Stroke) -> Unit = { pageId, stroke ->
+        inkCanvases.forEach { it.beginStrokeSave(stroke) }
+        viewModel.addStroke(
+            pageId, stroke, settings.shapeAssist, settings.handwritingRecognition, settings.recognitionLanguage,
+        ) { succeeded -> inkCanvases.forEach { it.finishStrokeSave(stroke, succeeded) } }
+    }
     var imagePageId by rememberSaveable { mutableStateOf<String?>(null) }
     var shapeDialogOpen by remember { mutableStateOf(false) }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -801,15 +807,7 @@ private fun EditorScreen(
                             pageTransitionEnabled = settings.pageTransition,
                             onPreviousPage = selectPreviousPage,
                             onNextPage = selectNextPage,
-                            onStrokeFinished = { pageId, stroke ->
-                                viewModel.addStroke(
-                                    pageId,
-                                    stroke,
-                                    settings.shapeAssist,
-                                    settings.handwritingRecognition,
-                                    settings.recognitionLanguage,
-                                )
-                            },
+                            onStrokeFinished = onStrokeFinished,
                             onEraseFinished = viewModel::eraseStrokes,
                             onSelectContent = viewModel::selectContent,
                             onMoveSelection = viewModel::moveSelectedStrokes,
@@ -875,15 +873,7 @@ private fun EditorScreen(
                             pageTransitionEnabled = settings.pageTransition,
                             onPreviousPage = selectPreviousPage,
                             onNextPage = selectNextPage,
-                            onStrokeFinished = { pageId, stroke ->
-                                viewModel.addStroke(
-                                    pageId,
-                                    stroke,
-                                    settings.shapeAssist,
-                                    settings.handwritingRecognition,
-                                    settings.recognitionLanguage,
-                                )
-                            },
+                            onStrokeFinished = onStrokeFinished,
                             onEraseFinished = viewModel::eraseStrokes,
                             onSelectContent = viewModel::selectContent,
                             onMoveSelection = viewModel::moveSelectedStrokes,
@@ -1328,14 +1318,27 @@ private fun BrushOptions(
                 }
             }
         }
+        if (highlighter) {
+            HighlighterOpacityControl(currentColor) { alpha ->
+                onUpdate { current ->
+                    current.copy(highlighterColorArgb = (alpha shl 24) or (current.highlighterColorArgb and 0x00FFFFFF))
+                }
+            }
+        }
         colors.forEach { (tag, labelResource, colorArgb) ->
-            val selectedColor = currentColor == colorArgb
+            val selectedColor = if (highlighter) {
+                (currentColor and 0x00FFFFFF) == (colorArgb and 0x00FFFFFF)
+            } else currentColor == colorArgb
+            val swatchColor = if (highlighter) Color(colorArgb).copy(alpha = (currentColor ushr 24) / 255f) else Color(colorArgb)
             val label = stringResource(labelResource)
             Surface(
                 onClick = {
                     onUpdate { current ->
                         if (highlighter) {
-                            current.copy(highlighterColorArgb = colorArgb)
+                            current.copy(
+                                highlighterColorArgb =
+                                    (current.highlighterColorArgb and 0xFF000000.toInt()) or (colorArgb and 0x00FFFFFF),
+                            )
                         } else {
                             current.copy(penColorArgb = colorArgb)
                         }
@@ -1354,30 +1357,56 @@ private fun BrushOptions(
                         },
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Surface(color = Color(colorArgb), shape = CircleShape, modifier = Modifier.size(24.dp)) {}
+                    Surface(color = swatchColor, shape = CircleShape, modifier = Modifier.size(24.dp)) {}
                 }
             }
         }
-        val smartShapesLabel = stringResource(R.string.smart_shapes)
-        Surface(
-            onClick = { onUpdate { current -> current.copy(shapeAssist = !current.shapeAssist) } },
-            color = if (settings.shapeAssist) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            shape = RoundedCornerShape(12.dp),
-            modifier =
-                Modifier
-                    .heightIn(min = 48.dp)
-                    .testTag("brush-shape-assist")
-                    .semantics {
-                        role = Role.Switch
-                        toggleableState = if (settings.shapeAssist) ToggleableState.On else ToggleableState.Off
-                        contentDescription = smartShapesLabel
-                    },
-        ) {
-            Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-                Text(smartShapesLabel, style = MaterialTheme.typography.labelLarge)
+        if (!highlighter) {
+            val smartShapesLabel = stringResource(R.string.smart_shapes)
+            Surface(
+                onClick = { onUpdate { current -> current.copy(shapeAssist = !current.shapeAssist) } },
+                color = if (settings.shapeAssist) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shape = RoundedCornerShape(12.dp),
+                modifier =
+                    Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("brush-shape-assist")
+                        .semantics {
+                            role = Role.Switch
+                            toggleableState = if (settings.shapeAssist) ToggleableState.On else ToggleableState.Off
+                            contentDescription = smartShapesLabel
+                        },
+            ) {
+                Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                    Text(smartShapesLabel, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun HighlighterOpacityControl(colorArgb: Int, onChange: (Int) -> Unit) {
+    val alpha = colorArgb ushr 24
+    var opacity by remember(alpha) { mutableFloatStateOf((alpha * 100f / 255f).coerceIn(10f, 80f)) }
+    val label = stringResource(R.string.highlighter_opacity)
+    val description = stringResource(R.string.highlighter_opacity_value, opacity.roundToInt())
+    Column(
+        Modifier.width(160.dp).padding(horizontal = 8.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(description, style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = opacity,
+            onValueChange = { opacity = it },
+            onValueChangeFinished = { onChange((opacity * 255f / 100f).roundToInt()) },
+            valueRange = 10f..80f,
+            modifier = Modifier.fillMaxWidth().testTag("highlighter-opacity-slider").semantics {
+                contentDescription = label
+                stateDescription = description
+            },
+        )
     }
 }
 
