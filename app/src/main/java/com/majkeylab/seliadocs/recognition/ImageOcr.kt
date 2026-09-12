@@ -28,32 +28,44 @@ internal data class ImageOcrResult(
 internal suspend fun recognizeImage(file: File): ImageOcrResult {
     require(file.isFile)
     val bitmap = withContext(Dispatchers.IO) { decodeForOcr(file) }
+    return try {
+        recognizeBitmap(bitmap)
+    } finally {
+        bitmap.recycle()
+    }
+}
+
+/** The caller owns [bitmap] and may recycle it after this function completes, including cancellation. */
+internal suspend fun recognizeBitmap(bitmap: Bitmap, wordLevel: Boolean = false): ImageOcrResult {
+    require(!bitmap.isRecycled && bitmap.width > 0 && bitmap.height > 0)
     val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     return try {
         withContext(NonCancellable) {
             val result = recognizer.process(InputImage.fromBitmap(bitmap, 0)).awaitTask()
+            val lines = result.textBlocks.asSequence().flatMap { it.lines.asSequence() }
+            val textBounds = if (wordLevel) {
+                lines.flatMap { line -> line.elements.asSequence().map { it.text to it.boundingBox } }
+            } else {
+                lines.map { it.text to it.boundingBox }
+            }
+            val regions = textBounds.mapNotNull { (text, bounds) ->
+                if (bounds == null) return@mapNotNull null
+                ImageOcrRegion(
+                    text = text.trim().take(MAX_OCR_REGION_TEXT_LENGTH),
+                    left = bounds.left.toFloat().coerceIn(0f, bitmap.width.toFloat()) / bitmap.width,
+                    top = bounds.top.toFloat().coerceIn(0f, bitmap.height.toFloat()) / bitmap.height,
+                    right = bounds.right.toFloat().coerceIn(0f, bitmap.width.toFloat()) / bitmap.width,
+                    bottom = bounds.bottom.toFloat().coerceIn(0f, bitmap.height.toFloat()) / bitmap.height,
+                ).takeIf(ImageOcrRegion::isValid)
+            }.take(if (wordLevel) MAX_OCR_WORD_REGION_COUNT + 1 else MAX_OCR_REGION_COUNT).toList()
+            require(!wordLevel || regions.size <= MAX_OCR_WORD_REGION_COUNT) { "OCR word limit exceeded" }
             ImageOcrResult(
                 text = result.text.trim().take(MAX_OCR_TEXT_LENGTH),
-                regions =
-                    result.textBlocks
-                        .asSequence()
-                        .flatMap { block -> block.lines.asSequence() }
-                        .mapNotNull { line ->
-                            val bounds = line.boundingBox ?: return@mapNotNull null
-                            ImageOcrRegion(
-                                text = line.text.trim().take(MAX_OCR_REGION_TEXT_LENGTH),
-                                left = bounds.left.toFloat().coerceIn(0f, bitmap.width.toFloat()) / bitmap.width,
-                                top = bounds.top.toFloat().coerceIn(0f, bitmap.height.toFloat()) / bitmap.height,
-                                right = bounds.right.toFloat().coerceIn(0f, bitmap.width.toFloat()) / bitmap.width,
-                                bottom = bounds.bottom.toFloat().coerceIn(0f, bitmap.height.toFloat()) / bitmap.height,
-                            ).takeIf(ImageOcrRegion::isValid)
-                        }.take(MAX_OCR_REGION_COUNT)
-                        .toList(),
+                regions = regions,
             )
         }
     } finally {
         recognizer.close()
-        bitmap.recycle()
     }
 }
 
@@ -114,5 +126,6 @@ private const val MAX_OCR_DIMENSION = 2_048
 private const val MAX_OCR_TEXT_LENGTH = 10_000
 private const val MAX_OCR_REGION_TEXT_LENGTH = 500
 private const val MAX_OCR_REGION_COUNT = 1_000
+private const val MAX_OCR_WORD_REGION_COUNT = 2_000
 internal const val MAX_OCR_REGION_DATA_LENGTH = 100_000
 private const val OCR_REGION_FIELD_COUNT = 5

@@ -12,4 +12,12 @@ interface IPdfRenderService {
         int height,
         in ParcelFileDescriptor output
     );
+    Bundle selectText(
+        in ParcelFileDescriptor pdf,
+        int pageIndex,
+        float startX,
+        float startY,
+        float endX,
+        float endY
+    );
 }

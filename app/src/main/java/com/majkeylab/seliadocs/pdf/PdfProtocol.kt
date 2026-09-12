@@ -20,8 +20,14 @@ internal object PdfProtocol {
     const val PAGE_WIDTHS = "pageWidths"
     const val PAGE_HEIGHTS = "pageHeights"
     const val SANDBOX_UID = "sandboxUid"
+    const val SELECTION_FOUND = "selectionFound"
+    const val SELECTION_TEXT = "selectionText"
+    const val SELECTION_BOUNDS = "selectionBounds"
     const val ERROR_INVALID = "invalid_pdf"
     const val ERROR_LIMIT = "pdf_limit"
+    const val ERROR_SELECTION_UNSUPPORTED = "pdf_selection_requires_android_15"
+    const val MAX_SELECTION_TEXT = 10_000
+    const val MAX_SELECTION_BOUNDS = 2_000
     const val MAX_PAGES = 2_000
     const val MAX_RENDER_DIMENSION = 4_096
     const val MAX_RENDER_PIXELS = 16_777_216L
